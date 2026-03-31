@@ -105,12 +105,14 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                 if child.type == "variable_declarator":
                     name_node = child.child_by_field_name("name")
                     value_node = child.child_by_field_name("value")
-                    if name_node and value_node:
-                        if has_string_concat_with_sql(value_node):
-                            tainted_vars[name_node.text.decode()] = {
-                                "line": name_node.start_point[0] + 1,
-                                "code": node.text.decode().strip()
-                            }
+                    if name_node and value_node and has_string_concat_with_sql(value_node):
+                        key = f"{name_node.text.decode()}_{name_node.start_point[0]}"
+                        tainted_vars[key] = {
+                            "var_name": name_node.text.decode(),
+                            "line": name_node.start_point[0] + 1,
+                            "code": node.text.decode().strip(),
+                            "method": find_parent_method(node)
+                        }
         for child in node.children:
             collect_tainted_vars(child)
 
@@ -119,8 +121,8 @@ def detect_sql_injection(filepath, tree, vuln_counter):
             text = node.text.decode()
             has_plus = "+" in text
             has_sql = any(kw in text.upper() for kw in SQL_KEYWORDS)
-            has_identifier = any(child.type == "identifier" for child in iterate_all(node))
-            return has_plus and has_sql and has_identifier
+            has_id = any(c.type == "identifier" for c in iterate_all(node))
+            return has_plus and has_sql and has_id
         return False
 
     def find_sqli(node):
@@ -130,21 +132,26 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                 args = node.child_by_field_name("arguments")
                 if args:
                     for arg in args.children:
-                        if arg.type == "identifier" and arg.text.decode() in tainted_vars:
-                            var_name = arg.text.decode()
-                            tainted = tainted_vars[var_name]
-                            vuln_counter[0] += 1
-                            vulnerabilities.append({
-                                "id": f"VULN-{vuln_counter[0]:03d}",
-                                "type": "SQL_INJECTION",
-                                "severity": "HIGH",
-                                "file": filepath,
-                                "line": tainted["line"],
-                                "function": find_parent_method(node),
-                                "code_snippet": tainted["code"],
-                                "call_chain": build_call_chain(node),
-                                "description": ""
-                            })
+                        if arg.type == "identifier":
+                            arg_name = arg.text.decode()
+                            current_method = find_parent_method(node)
+                            matched = [k for k, v in tainted_vars.items()
+                                       if v["var_name"] == arg_name and v["method"] == current_method]
+                            if matched:
+                                closest = min(matched, key=lambda k: abs(tainted_vars[k]["line"] - (arg.start_point[0] + 1)))
+                                var = tainted_vars[closest]
+                                vuln_counter[0] += 1
+                                vulnerabilities.append({
+                                    "id": f"VULN-{vuln_counter[0]:03d}",
+                                    "type": "SQL_INJECTION",
+                                    "severity": "HIGH",
+                                    "file": filepath,
+                                    "line": var["line"],
+                                    "function": current_method,
+                                    "code_snippet": var["code"],
+                                    "call_chain": build_call_chain(node),
+                                    "description": ""
+                                })
                         if arg.type == "binary_expression" and has_string_concat_with_sql(arg):
                             vuln_counter[0] += 1
                             vulnerabilities.append({
@@ -176,11 +183,6 @@ def detect_sql_injection(filepath, tree, vuln_counter):
     collect_tainted_vars(tree.root_node)
     find_sqli(tree.root_node)
     return vulnerabilities
-
-
-# ============================================================
-# 3. XSS 탐지
-# ============================================================
 
 def detect_xss(filepath, tree, vuln_counter):
     vulnerabilities = []

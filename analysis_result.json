@@ -1,9 +1,9 @@
 {
   "analysis_result": {
     "repository": "",
-    "analyzed_at": "2026-03-31T14:06:27.588565",
+    "analyzed_at": "2026-03-31T14:15:19.695670",
     "language": "java",
-    "files_analyzed": 2,
+    "files_analyzed": 3,
     "vulnerabilities": [
       {
         "id": "VULN-001",
@@ -84,6 +84,86 @@
           "resp.getWriter().println"
         ],
         "description": ""
+      },
+      {
+        "id": "VULN-007",
+        "type": "HARDCODED_SECRET",
+        "severity": "MEDIUM",
+        "file": "src/analyzer/test_samples/AuthController.java",
+        "line": 8,
+        "function": null,
+        "code_snippet": "private String secretKey = \"my-secret-key-12345\";",
+        "call_chain": [],
+        "description": ""
+      },
+      {
+        "id": "VULN-008",
+        "type": "HARDCODED_SECRET",
+        "severity": "MEDIUM",
+        "file": "src/analyzer/test_samples/AuthController.java",
+        "line": 9,
+        "function": null,
+        "code_snippet": "private String dbPassword = \"root1234!\";",
+        "call_chain": [],
+        "description": ""
+      },
+      {
+        "id": "VULN-009",
+        "type": "SQL_INJECTION",
+        "severity": "HIGH",
+        "file": "src/analyzer/test_samples/AuthController.java",
+        "line": 19,
+        "function": "login",
+        "code_snippet": "String query = \"SELECT * FROM users WHERE username = '\" + username + \"' AND password = '\" + password + \"'\";",
+        "call_chain": [
+          "AuthController.login",
+          "stmt.executeQuery"
+        ],
+        "description": ""
+      },
+      {
+        "id": "VULN-010",
+        "type": "SQL_INJECTION",
+        "severity": "HIGH",
+        "file": "src/analyzer/test_samples/AuthController.java",
+        "line": 28,
+        "function": "deleteUser",
+        "code_snippet": "String query = \"DELETE FROM users WHERE id = '\" + userId + \"'\";",
+        "call_chain": [
+          "AuthController.deleteUser",
+          "stmt.executeUpdate"
+        ],
+        "description": ""
+      },
+      {
+        "id": "VULN-011",
+        "type": "XSS",
+        "severity": "HIGH",
+        "file": "src/analyzer/test_samples/AuthController.java",
+        "line": 44,
+        "function": "showError",
+        "code_snippet": "resp.getWriter().println(\"<div class='error'>\" + errorMsg + \"</div>\")",
+        "call_chain": [
+          "req.getParameter → errorMsg",
+          "AuthController.showError",
+          "resp.getWriter().println"
+        ],
+        "description": ""
+      },
+      {
+        "id": "VULN-012",
+        "type": "XSS",
+        "severity": "HIGH",
+        "file": "src/analyzer/test_samples/AuthController.java",
+        "line": 50,
+        "function": "searchResult",
+        "code_snippet": "resp.getWriter().println(\"<h2>검색 결과: \" + keyword + \"</h2>\")",
+        "call_chain": [
+          "req.getParameter → keyword",
+          "AuthController.searchResult",
+          "resp.getWriter().println"
+        ],
+        "description": ""
       }
     ],
     "call_graph": {
@@ -121,25 +201,63 @@
         "pstmt.setString",
         "mapOrder",
         "pstmt.executeQuery"
+      ],
+      "AuthController.login": [
+        "DriverManager.getConnection",
+        "conn.createStatement",
+        "stmt.executeQuery",
+        "mapUser"
+      ],
+      "AuthController.deleteUser": [
+        "DriverManager.getConnection",
+        "conn.createStatement",
+        "stmt.executeUpdate"
+      ],
+      "AuthController.safeLogin": [
+        "DriverManager.getConnection",
+        "conn.prepareStatement",
+        "pstmt.setString",
+        "mapUser",
+        "pstmt.executeQuery"
+      ],
+      "AuthController.showError": [
+        "req.getParameter",
+        "resp.getWriter().println",
+        "resp.getWriter"
+      ],
+      "AuthController.searchResult": [
+        "req.getParameter",
+        "resp.getWriter().println",
+        "resp.getWriter"
+      ],
+      "AuthController.safeInput": [
+        "req.getParameter",
+        "resp.getWriter().println",
+        "resp.getWriter"
+      ],
+      "AuthController.safeOutput": [
+        "resp.getWriter().println",
+        "resp.getWriter"
       ]
     },
     "summary": {
-      "total_vulnerabilities": 6,
+      "total_vulnerabilities": 12,
       "by_severity": {
-        "HIGH": 4,
-        "MEDIUM": 2,
+        "HIGH": 8,
+        "MEDIUM": 4,
         "LOW": 0
       },
       "by_type": {
-        "SQL_INJECTION": 2,
-        "XSS": 2,
-        "HARDCODED_SECRET": 2
+        "SQL_INJECTION": 4,
+        "XSS": 4,
+        "HARDCODED_SECRET": 4
       },
       "score": {
-        "overall": 65,
+        "overall": 53,
         "by_file": {
           "UserDAO.java": 65,
-          "OrderService.java": 65
+          "OrderService.java": 65,
+          "AuthController.java": 30
         }
       }
     }
