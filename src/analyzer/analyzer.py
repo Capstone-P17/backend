@@ -252,7 +252,7 @@ def detect_xss(filepath, tree, vuln_counter):
 
     def build_xss_chain(node, used_var):
         chain = []
-                if used_var and used_var in user_input_vars:
+        if used_var and used_var in user_input_vars:
             source_code = user_input_vars[used_var]["code"]
             if "getHeader" in source_code:
                 chain.append(f"req.getHeader → {used_var}")
@@ -262,7 +262,6 @@ def detect_xss(filepath, tree, vuln_counter):
                 chain.append(f"req.getCookies → {used_var}")
             else:
                 chain.append(f"req.getParameter → {used_var}")
-
         cls = find_parent_class(node)
         method = find_parent_method(node)
         if cls and method:
