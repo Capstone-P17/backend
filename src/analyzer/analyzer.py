@@ -315,8 +315,49 @@ def build_call_graph(tree):
     return call_graph
 
 
+
 # ============================================================
-# 5. 통합 분석 실행
+# 5. 보안 점수 계산
+# ============================================================
+
+SEVERITY_PENALTY = {
+    "HIGH": 15,
+    "MEDIUM": 5,
+    "LOW": 2
+}
+
+def calculate_scores(vulns, files):
+    """파일별 점수 + 전체 평균 점수 계산"""
+    # 파일별 취약점 분류
+    file_vulns = {}
+    for f in files:
+        file_vulns[f] = [v for v in vulns if v["file"] == f]
+
+    # 파일별 점수 계산
+    by_file = {}
+    for f, fv in file_vulns.items():
+        score = 100
+        for v in fv:
+            score -= SEVERITY_PENALTY.get(v["severity"], 0)
+        score = max(0, score)
+        # 파일명만 표시 (경로 제거)
+        filename = os.path.basename(f)
+        by_file[filename] = score
+
+    # 전체 평균
+    if by_file:
+        overall = round(sum(by_file.values()) / len(by_file))
+    else:
+        overall = 100
+
+    return {
+        "overall": overall,
+        "by_file": by_file
+    }
+
+
+# ============================================================
+# 6. 통합 분석 실행
 # ============================================================
 
 def analyze_file(filepath):
@@ -341,7 +382,8 @@ def analyze_file(filepath):
             "SQL_INJECTION": sum(1 for v in vulns if v["type"] == "SQL_INJECTION"),
             "XSS": sum(1 for v in vulns if v["type"] == "XSS"),
             "HARDCODED_SECRET": sum(1 for v in vulns if v["type"] == "HARDCODED_SECRET")
-        }
+        },
+        "score": calculate_scores(vulns, [filepath])
     }
 
     return {
@@ -378,6 +420,13 @@ def analyze_directory(directory, repository=""):
                 file_call_graph = build_call_graph(tree)
                 all_call_graph.update(file_call_graph)
 
+    # 분석된 파일 목록 수집
+    analyzed_files = []
+    for root_dir, dirs, files in os.walk(directory):
+        for filename in files:
+            if filename.endswith(".java"):
+                analyzed_files.append(os.path.join(root_dir, filename))
+
     summary = {
         "total_vulnerabilities": len(all_vulns),
         "by_severity": {
@@ -389,7 +438,8 @@ def analyze_directory(directory, repository=""):
             "SQL_INJECTION": sum(1 for v in all_vulns if v["type"] == "SQL_INJECTION"),
             "XSS": sum(1 for v in all_vulns if v["type"] == "XSS"),
             "HARDCODED_SECRET": sum(1 for v in all_vulns if v["type"] == "HARDCODED_SECRET")
-        }
+        },
+        "score": calculate_scores(all_vulns, analyzed_files)
     }
 
     return {

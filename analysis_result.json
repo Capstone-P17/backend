@@ -1,7 +1,7 @@
 {
   "analysis_result": {
     "repository": "",
-    "analyzed_at": "2026-03-31T11:24:22.991933",
+    "analyzed_at": "2026-03-31T14:06:27.588565",
     "language": "java",
     "files_analyzed": 2,
     "vulnerabilities": [
@@ -134,6 +134,13 @@
         "SQL_INJECTION": 2,
         "XSS": 2,
         "HARDCODED_SECRET": 2
+      },
+      "score": {
+        "overall": 65,
+        "by_file": {
+          "UserDAO.java": 65,
+          "OrderService.java": 65
+        }
       }
     }
   }
