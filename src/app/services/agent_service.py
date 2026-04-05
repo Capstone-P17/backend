@@ -2,49 +2,61 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from src.app.agents.security_audit_graph import SecurityAuditGraph
 from src.app.core.config import Settings
-from src.app.schemas.agent import AgentMessage, AgentRunRequest, AgentRunResponse
+from src.app.schemas.agent import (
+    AgentRunRequest,
+    AgentRunResponse,
+    SecurityAnalysisSummary,
+    VulnerabilityFinding,
+)
+from src.app.services.analyzer_service import AnalyzerService
 
 
 class AgentService:
-    """Simple orchestration service that can be replaced by a real LLM adapter later."""
+    """Application service for the LangGraph-based security audit agent."""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.analyzer_service = AnalyzerService(workspace_root=settings.workspace_root)
+        self.security_audit_graph = SecurityAuditGraph(
+            settings=settings,
+            analyzer_service=self.analyzer_service,
+        )
 
     def run(self, payload: AgentRunRequest) -> AgentRunResponse:
         session_id = payload.session_id or f"session-{uuid4().hex[:12]}"
-        latest_user_message = next(
-            (message for message in reversed(payload.messages) if message.role == "user"),
-            None,
+        result = self.security_audit_graph.invoke(
+            target_path=payload.target_path,
+            repository=payload.repository or "",
+            instructions=payload.instructions or "",
         )
-        user_input = latest_user_message.content if latest_user_message else "No user input provided."
 
-        trace = [
-            "request_received",
-            f"agent_selected:{self.settings.default_agent_name}",
-            "context_prepared",
-            "response_composed",
+        analysis = result["analysis_result"]["analysis_result"]
+        summary_model = SecurityAnalysisSummary.model_validate(analysis["summary"])
+        findings = [
+            VulnerabilityFinding.model_validate(vulnerability)
+            for vulnerability in analysis.get("vulnerabilities", [])
         ]
-
-        reply = AgentMessage(
-            role="assistant",
-            content=self._build_reply(user_input=user_input, context=payload.context),
-        )
 
         return AgentRunResponse(
             agent_name=self.settings.default_agent_name,
             session_id=session_id,
-            summary="기본 에이전트 파이프라인으로 요청을 수신하고 응답을 구성했습니다.",
-            reply=reply,
-            trace=trace,
+            target_path=analysis.get("target_path", payload.target_path),
+            summary=self._build_summary(summary_model),
+            report=result["report"],
+            trace=result["trace"],
+            analysis_summary=summary_model,
+            findings=findings,
+            raw_analysis=result["analysis_result"] if payload.include_raw_analysis else None,
         )
 
-    def _build_reply(self, user_input: str, context: dict[str, object]) -> str:
-        context_keys = ", ".join(sorted(context.keys())) if context else "none"
+    @staticmethod
+    def _build_summary(summary: SecurityAnalysisSummary) -> str:
         return (
-            f"Processed request: {user_input}\n"
-            f"Configured agent: {self.settings.default_agent_name}\n"
-            f"Known context keys: {context_keys}\n"
-            "Next step: connect this service to your real model client or tool executor."
+            f"총 {summary.total_vulnerabilities}건의 취약점을 탐지했습니다. "
+            f"HIGH {summary.by_severity.get('HIGH', 0)}건, "
+            f"MEDIUM {summary.by_severity.get('MEDIUM', 0)}건, "
+            f"LOW {summary.by_severity.get('LOW', 0)}건이며, "
+            f"전체 보안 점수는 {summary.score.overall}점입니다."
         )

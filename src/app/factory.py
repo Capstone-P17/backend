@@ -11,7 +11,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
-        description="FastAPI backend scaffold for AI agent workflows.",
+        description="LangGraph-enabled FastAPI backend for AI-driven security audit workflows.",
     )
 
     app.add_middleware(
@@ -22,7 +22,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(api_router, prefix=settings.api_prefix)
+    app.include_router(api_router)
 
     @app.get("/", tags=["meta"])
     def read_root() -> dict[str, str]:

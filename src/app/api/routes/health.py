@@ -11,6 +11,5 @@ def healthcheck() -> HealthResponse:
     settings = get_settings()
     return HealthResponse(
         status="ok",
-        app_name=settings.app_name,
-        environment=settings.environment,
+        version=settings.app_version,
     )
