@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZipFile
@@ -30,6 +33,13 @@ class AnalysisResultNotFoundError(LookupError):
     pass
 
 
+@dataclass(frozen=True)
+class PreparedAnalysisTarget:
+    target_path: str
+    display_target_path: str
+    repository: str = ""
+
+
 class AnalysisService:
     """Application service that matches the public analysis API contract."""
 
@@ -44,14 +54,9 @@ class AnalysisService:
         self.result_store = result_store
 
     def analyze_uploaded_file(self, filename: str, content: bytes) -> dict[str, object]:
-        if Path(filename).suffix.lower() != ".java":
-            raise InvalidJavaFileError("Java 파일만 분석 가능합니다")
-
         try:
-            with TemporaryDirectory(dir=self.settings.workspace_root) as temp_dir:
-                target_path = Path(temp_dir) / Path(filename).name
-                target_path.write_bytes(content)
-                result = self.analyzer_service.analyze(str(target_path))
+            with self.prepare_uploaded_file(filename=filename, content=content) as prepared_target:
+                result = self.analyzer_service.analyze(prepared_target.target_path)
         except InvalidJavaFileError:
             raise
         except Exception as exc:
@@ -61,24 +66,26 @@ class AnalysisService:
         self.result_store.save(sanitized_result)
         return sanitized_result
 
+    @contextmanager
+    def prepare_uploaded_file(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
+        normalized_name = Path(filename).name
+        if Path(normalized_name).suffix.lower() != ".java":
+            raise InvalidJavaFileError("Java 파일만 분석 가능합니다")
+
+        with TemporaryDirectory(dir=self.settings.workspace_root) as temp_dir:
+            target_path = Path(temp_dir) / normalized_name
+            target_path.write_bytes(content)
+            yield PreparedAnalysisTarget(
+                target_path=str(target_path),
+                display_target_path=normalized_name,
+            )
+
     def analyze_uploaded_repository(self, filename: str, content: bytes) -> dict[str, object]:
-        archive_name = Path(filename).name
-        if not archive_name:
-            raise InvalidRepositoryArchiveError("레포지토리 압축 파일을 첨부해주세요")
-
-        self._validate_repository_archive_filename(archive_name)
-
         try:
-            with TemporaryDirectory(dir=self.settings.workspace_root) as temp_dir:
-                archive_path = Path(temp_dir) / archive_name
-                extract_root = Path(temp_dir) / "repo_upload"
-                archive_path.write_bytes(content)
-                extract_root.mkdir()
-                self._extract_repository_archive(archive_path, extract_root)
-                analysis_root = self._resolve_repository_analysis_root(extract_root)
+            with self.prepare_uploaded_repository(filename=filename, content=content) as prepared_target:
                 result = self.analyzer_service.analyze(
-                    str(analysis_root),
-                    repository=Path(archive_name).stem,
+                    prepared_target.target_path,
+                    repository=prepared_target.repository,
                 )
         except InvalidRepositoryArchiveError:
             raise
@@ -90,6 +97,27 @@ class AnalysisService:
         sanitized_result = self._sanitize_public_result(result)
         self.result_store.save(sanitized_result)
         return sanitized_result
+
+    @contextmanager
+    def prepare_uploaded_repository(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
+        archive_name = Path(filename).name
+        if not archive_name:
+            raise InvalidRepositoryArchiveError("레포지토리 압축 파일을 첨부해주세요")
+
+        self._validate_repository_archive_filename(archive_name)
+
+        with TemporaryDirectory(dir=self.settings.workspace_root) as temp_dir:
+            archive_path = Path(temp_dir) / archive_name
+            extract_root = Path(temp_dir) / "repo_upload"
+            archive_path.write_bytes(content)
+            extract_root.mkdir()
+            self._extract_repository_archive(archive_path, extract_root)
+            analysis_root = self._resolve_repository_analysis_root(extract_root)
+            yield PreparedAnalysisTarget(
+                target_path=str(analysis_root),
+                display_target_path=archive_name,
+                repository=Path(archive_name).stem,
+            )
 
     def get_latest_result(self) -> dict[str, object]:
         latest_result = self.result_store.get_latest()

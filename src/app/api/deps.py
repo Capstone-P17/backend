@@ -9,7 +9,10 @@ from src.app.services.result_store import AnalysisResultStore
 
 @lru_cache
 def get_agent_service() -> AgentService:
-    return AgentService(settings=get_settings())
+    return AgentService(
+        settings=get_settings(),
+        analysis_service=get_analysis_service(),
+    )
 
 
 @lru_cache
