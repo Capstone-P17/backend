@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.analyzer.analyzer import analyze_directory, analyze_file
+from src.app.services.static_analysis import analyze_directory, analyze_file
 
 
 class AnalyzerService:
