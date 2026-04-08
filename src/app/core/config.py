@@ -75,6 +75,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OPENAI_API_KEY", "AGENT_OPENAI_API_KEY"),
     )
+    openai_model: str = Field(
+        default=DEFAULT_OPENAI_MODEL,
+        validation_alias=AliasChoices("OPENAI_MODEL", "AGENT_OPENAI_MODEL"),
+    )
     openai_temperature: float = Field(
         default=0.1,
         validation_alias=AliasChoices("OPENAI_TEMPERATURE", "AGENT_OPENAI_TEMPERATURE"),
@@ -82,6 +86,58 @@ class Settings(BaseSettings):
     allowed_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         validation_alias=AliasChoices("ALLOWED_ORIGINS", "AGENT_ALLOWED_ORIGINS"),
+    )
+    database_url: str = Field(
+        default=f"sqlite:///{(PROJECT_ROOT / 'app.db').as_posix()}",
+        validation_alias=AliasChoices("DATABASE_URL", "AGENT_DATABASE_URL"),
+    )
+    jwt_secret_key: str = Field(
+        default="change-this-secret-in-production",
+        validation_alias=AliasChoices("JWT_SECRET_KEY", "AGENT_JWT_SECRET_KEY"),
+    )
+    jwt_algorithm: str = Field(
+        default="HS256",
+        validation_alias=AliasChoices("JWT_ALGORITHM", "AGENT_JWT_ALGORITHM"),
+    )
+    access_token_expire_minutes: int = Field(
+        default=60,
+        validation_alias=AliasChoices(
+            "ACCESS_TOKEN_EXPIRE_MINUTES",
+            "AGENT_ACCESS_TOKEN_EXPIRE_MINUTES",
+        ),
+    )
+    github_client_id: str = Field(
+        default="",
+        validation_alias=AliasChoices("GITHUB_CLIENT_ID", "AGENT_GITHUB_CLIENT_ID"),
+    )
+    github_client_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GITHUB_CLIENT_SECRET",
+            "AGENT_GITHUB_CLIENT_SECRET",
+        ),
+    )
+    github_redirect_uri: str = Field(
+        default="http://localhost:8000/auth/github/callback",
+        validation_alias=AliasChoices(
+            "GITHUB_REDIRECT_URI",
+            "AGENT_GITHUB_REDIRECT_URI",
+        ),
+    )
+    github_authorize_url: str = Field(
+        default="https://github.com/login/oauth/authorize",
+        validation_alias=AliasChoices(
+            "GITHUB_AUTHORIZE_URL",
+            "AGENT_GITHUB_AUTHORIZE_URL",
+        ),
+    )
+    github_token_url: str = Field(
+        default="https://github.com/login/oauth/access_token",
+        validation_alias=AliasChoices("GITHUB_TOKEN_URL", "AGENT_GITHUB_TOKEN_URL"),
+    )
+    github_user_api_url: str = Field(
+        default="https://api.github.com/user",
+        validation_alias=AliasChoices("GITHUB_USER_API_URL", "AGENT_GITHUB_USER_API_URL"),
     )
 
     @property

@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.app.api.router import api_router
 from src.app.core.config import get_settings
+from src.app.db.session import init_db
 
 
 def create_app() -> FastAPI:
@@ -21,6 +22,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.on_event("startup")
+    def on_startup() -> None:
+        init_db()
 
     app.include_router(api_router)
 
