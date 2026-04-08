@@ -117,7 +117,7 @@ class SecurityAuditGraph:
 
     def _create_llm(self) -> ChatOpenAI:
         if not self.settings.openai_api_key:
-            raise RuntimeError("AGENT_OPENAI_API_KEY is not configured.")
+            raise RuntimeError("OPENAI_API_KEY is not configured.")
 
         return ChatOpenAI(
             api_key=self.settings.openai_api_key,
