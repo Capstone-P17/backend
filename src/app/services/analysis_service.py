@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -8,9 +9,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import BadZipFile, ZipFile
 
+import httpx
+
 from src.app.core.config import Settings
 from src.app.services.analyzer_service import AnalyzerService
 from src.app.services.result_store import AnalysisResultStore
+
+_GITHUB_REPO_URL_RE = re.compile(
+    r"^https://github\.com/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+?)(?:\.git)?$"
+)
+_GITHUB_ARCHIVE_URL = "https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
+_DEFAULT_BRANCHES = ("main", "master")
+_CLONE_TIMEOUT_SECONDS = 60
 
 
 class InvalidJavaFileError(ValueError):
@@ -22,6 +32,14 @@ class InvalidRepositoryArchiveError(ValueError):
 
 
 class RepositoryArchiveExtractionError(RuntimeError):
+    pass
+
+
+class InvalidGitHubRepositoryError(ValueError):
+    pass
+
+
+class GitHubRepositoryCloneError(RuntimeError):
     pass
 
 
@@ -118,6 +136,80 @@ class AnalysisService:
                 display_target_path=archive_name,
                 repository=Path(archive_name).stem,
             )
+
+    def analyze_github_repository(self, url: str) -> dict[str, object]:
+        try:
+            with self.prepare_github_repository(url=url) as prepared_target:
+                result = self.analyzer_service.analyze(
+                    prepared_target.target_path,
+                    repository=prepared_target.repository,
+                )
+        except (InvalidGitHubRepositoryError, GitHubRepositoryCloneError, InvalidRepositoryArchiveError):
+            raise
+        except Exception as exc:
+            raise AnalysisExecutionError("GitHub 레포지토리 분석 중 오류 발생") from exc
+
+        sanitized_result = self._sanitize_public_result(result)
+        self.result_store.save(sanitized_result)
+        return sanitized_result
+
+    @contextmanager
+    def prepare_github_repository(self, url: str) -> Iterator[PreparedAnalysisTarget]:
+        url = url.strip().rstrip("/")
+        match = _GITHUB_REPO_URL_RE.match(url)
+        if not match:
+            raise InvalidGitHubRepositoryError(
+                "유효한 GitHub 레포지토리 URL이 아닙니다. "
+                "https://github.com/owner/repo 형식으로 입력해주세요."
+            )
+
+        owner = match.group("owner")
+        repo = match.group("repo")
+
+        with TemporaryDirectory(dir=self.settings.workspace_root) as temp_dir:
+            archive_content, branch = self._download_github_archive(owner, repo)
+            archive_name = f"{repo}-{branch}.zip"
+            archive_path = Path(temp_dir) / archive_name
+            extract_root = Path(temp_dir) / "repo_clone"
+            archive_path.write_bytes(archive_content)
+            extract_root.mkdir()
+            self._extract_repository_archive(archive_path, extract_root)
+            analysis_root = self._resolve_repository_analysis_root(extract_root)
+            yield PreparedAnalysisTarget(
+                target_path=str(analysis_root),
+                display_target_path=f"github.com/{owner}/{repo}",
+                repository=repo,
+            )
+
+    def _download_github_archive(self, owner: str, repo: str) -> tuple[bytes, str]:
+        """GitHub archive zip을 다운로드합니다. main 브랜치를 먼저 시도하고 실패 시 master를 시도합니다."""
+        last_exc: Exception | None = None
+        for branch in _DEFAULT_BRANCHES:
+            archive_url = _GITHUB_ARCHIVE_URL.format(owner=owner, repo=repo, branch=branch)
+            try:
+                with httpx.Client(follow_redirects=True, timeout=_CLONE_TIMEOUT_SECONDS) as client:
+                    response = client.get(archive_url)
+                if response.status_code == 200:
+                    return response.content, branch
+                if response.status_code == 404:
+                    continue
+                raise GitHubRepositoryCloneError(
+                    f"GitHub 레포지토리 다운로드 실패 (HTTP {response.status_code})"
+                )
+            except httpx.TimeoutException as exc:
+                raise GitHubRepositoryCloneError(
+                    "GitHub 레포지토리 다운로드 시간이 초과되었습니다"
+                ) from exc
+            except httpx.RequestError as exc:
+                last_exc = exc
+
+        if last_exc:
+            raise GitHubRepositoryCloneError(
+                "GitHub 레포지토리에 연결할 수 없습니다"
+            ) from last_exc
+        raise InvalidGitHubRepositoryError(
+            f"레포지토리를 찾을 수 없습니다: github.com/{owner}/{repo}"
+        )
 
     def get_latest_result(self) -> dict[str, object]:
         latest_result = self.result_store.get_latest()

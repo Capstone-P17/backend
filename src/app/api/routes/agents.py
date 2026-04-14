@@ -7,9 +7,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from src.app.api.deps import get_agent_service
 from src.app.core.config import get_settings
 from src.app.schemas.agent import AgentProfileResponse, AgentRunRequest, AgentRunResponse
+from src.app.schemas.repository import GitHubRunRequest
 from src.app.services.agent_service import AgentService
 from src.app.services.analysis_service import (
     AnalysisExecutionError,
+    GitHubRepositoryCloneError,
+    InvalidGitHubRepositoryError,
     InvalidJavaFileError,
     InvalidRepositoryArchiveError,
     RepositoryArchiveExtractionError,
@@ -88,7 +91,7 @@ async def run_agent_with_uploaded_file(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@router.post("/runs/repository", response_model=AgentRunResponse)
+@router.post("/runs/archive", response_model=AgentRunResponse)
 async def run_agent_with_uploaded_repository(
     file: UploadFile | None = File(default=None),
     instructions: Annotated[str | None, Form()] = None,
@@ -112,6 +115,28 @@ async def run_agent_with_uploaded_repository(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RepositoryArchiveExtractionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except AnalysisExecutionError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/runs/repository", response_model=AgentRunResponse)
+async def run_agent_with_github_repository(
+    body: GitHubRunRequest,
+    service: AgentService = Depends(get_agent_service),
+) -> AgentRunResponse:
+    try:
+        return service.run_github_repository(
+            url=body.url,
+            session_id=body.session_id,
+            instructions=body.instructions or "",
+            include_raw_analysis=body.include_raw_analysis,
+        )
+    except (InvalidGitHubRepositoryError, InvalidRepositoryArchiveError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GitHubRepositoryCloneError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except AnalysisExecutionError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:

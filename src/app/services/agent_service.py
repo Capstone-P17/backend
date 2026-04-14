@@ -83,6 +83,27 @@ class AgentService:
             include_raw_analysis=include_raw_analysis,
         )
 
+    def run_github_repository(
+        self,
+        *,
+        url: str,
+        session_id: str | None = None,
+        instructions: str = "",
+        include_raw_analysis: bool = False,
+    ) -> AgentRunResponse:
+        with self.analysis_service.prepare_github_repository(url=url) as prepared_target:
+            result = self.security_audit_graph.invoke(
+                target_path=prepared_target.target_path,
+                repository=prepared_target.repository,
+                instructions=instructions,
+            )
+        return self._build_response(
+            result=result,
+            session_id=session_id or f"session-{uuid4().hex[:12]}",
+            display_target_path=prepared_target.display_target_path,
+            include_raw_analysis=include_raw_analysis,
+        )
+
     def _build_response(
         self,
         *,
