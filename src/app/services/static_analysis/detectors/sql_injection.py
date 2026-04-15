@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import (
     find_parent_class,
     find_parent_method,
@@ -8,6 +9,21 @@ from src.app.services.static_analysis.parser import (
 
 SQL_EXEC_METHODS = ["executeQuery", "executeUpdate", "execute"]
 SQL_KEYWORDS = ["SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE"]
+
+# 인증 우회 가능성 → CRITICAL
+AUTH_KEYWORDS = ["USERNAME", "PASSWORD", "PASSWD", "LOGIN", "AUTH"]
+# 데이터 파괴 가능성 → CRITICAL
+DESTRUCTIVE_KEYWORDS = ["DELETE", "DROP", "UPDATE"]
+
+
+def _determine_severity(code_text: str) -> str:
+    """쿼리 코드 컨텍스트로 severity 결정."""
+    upper = code_text.upper()
+    if any(kw in upper for kw in AUTH_KEYWORDS):
+        return "CRITICAL"
+    if any(kw in upper for kw in DESTRUCTIVE_KEYWORDS):
+        return "CRITICAL"
+    return "HIGH"
 
 
 def detect_sql_injection(filepath, tree, vuln_counter):
@@ -63,12 +79,14 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                                     ),
                                 )
                                 var = tainted_vars[closest]
+                                severity = _determine_severity(var["code"])
                                 vuln_counter[0] += 1
                                 vulnerabilities.append(
                                     {
                                         "id": f"VULN-{vuln_counter[0]:03d}",
                                         "type": "SQL_INJECTION",
-                                        "severity": "HIGH",
+                                        "severity": severity,
+                                        "cvss": get_cvss("SQL_INJECTION", severity),
                                         "file": filepath,
                                         "line": var["line"],
                                         "function": current_method,
@@ -78,12 +96,14 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                                     }
                                 )
                         if arg.type == "binary_expression" and has_string_concat_with_sql(arg):
+                            severity = _determine_severity(node.text.decode())
                             vuln_counter[0] += 1
                             vulnerabilities.append(
                                 {
                                     "id": f"VULN-{vuln_counter[0]:03d}",
                                     "type": "SQL_INJECTION",
-                                    "severity": "HIGH",
+                                    "severity": severity,
+                                    "cvss": get_cvss("SQL_INJECTION", severity),
                                     "file": filepath,
                                     "line": node.start_point[0] + 1,
                                     "function": find_parent_method(node),

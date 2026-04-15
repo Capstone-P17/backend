@@ -4,8 +4,12 @@ import os
 from datetime import datetime
 
 from src.app.services.static_analysis.call_graph import build_call_graph
+from src.app.services.static_analysis.detectors.command_injection import detect_command_injection
+from src.app.services.static_analysis.detectors.insecure_random import detect_insecure_random
+from src.app.services.static_analysis.detectors.path_traversal import detect_path_traversal
 from src.app.services.static_analysis.detectors.secrets import detect_hardcoded_secrets
 from src.app.services.static_analysis.detectors.sql_injection import detect_sql_injection
+from src.app.services.static_analysis.detectors.weak_hash import detect_weak_hash
 from src.app.services.static_analysis.detectors.xss import detect_xss
 from src.app.services.static_analysis.parser import parse_file
 from src.app.services.static_analysis.scoring import build_summary
@@ -19,6 +23,10 @@ def analyze_file(filepath):
     vulnerabilities += detect_hardcoded_secrets(filepath, tree, vuln_counter)
     vulnerabilities += detect_sql_injection(filepath, tree, vuln_counter)
     vulnerabilities += detect_xss(filepath, tree, vuln_counter)
+    vulnerabilities += detect_path_traversal(filepath, tree, vuln_counter)
+    vulnerabilities += detect_command_injection(filepath, tree, vuln_counter)
+    vulnerabilities += detect_insecure_random(filepath, tree, vuln_counter)
+    vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)
 
     return {
         "analysis_result": {
@@ -50,6 +58,10 @@ def analyze_directory(directory, repository=""):
             all_vulnerabilities += detect_hardcoded_secrets(filepath, tree, vuln_counter)
             all_vulnerabilities += detect_sql_injection(filepath, tree, vuln_counter)
             all_vulnerabilities += detect_xss(filepath, tree, vuln_counter)
+            all_vulnerabilities += detect_path_traversal(filepath, tree, vuln_counter)
+            all_vulnerabilities += detect_command_injection(filepath, tree, vuln_counter)
+            all_vulnerabilities += detect_insecure_random(filepath, tree, vuln_counter)
+            all_vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)
             all_call_graph.update(build_call_graph(tree))
 
     return {

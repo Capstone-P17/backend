@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
 
 INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
@@ -53,6 +54,7 @@ def detect_xss(filepath, tree, vuln_counter):
                                 "id": f"VULN-{vuln_counter[0]:03d}",
                                 "type": "XSS",
                                 "severity": "HIGH",
+                                "cvss": get_cvss("XSS", "HIGH"),
                                 "file": filepath,
                                 "line": node.start_point[0] + 1,
                                 "function": find_parent_method(node),

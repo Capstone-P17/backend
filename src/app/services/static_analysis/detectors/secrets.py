@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_method
 
 SECRET_KEYWORDS = ["password", "passwd", "secret", "api_key", "apikey", "token", "credential"]
@@ -25,6 +26,7 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
                                     "id": f"VULN-{vuln_counter[0]:03d}",
                                     "type": "HARDCODED_SECRET",
                                     "severity": "MEDIUM",
+                                    "cvss": get_cvss("HARDCODED_SECRET", "MEDIUM"),
                                     "file": filepath,
                                     "line": name_node.start_point[0] + 1,
                                     "function": find_parent_method(node),
