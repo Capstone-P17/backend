@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+__pycache__/
+*.py[codz]
+.env
+app.db
+analysis_result.json
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
