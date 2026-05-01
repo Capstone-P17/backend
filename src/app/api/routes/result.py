@@ -5,10 +5,14 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from src.app.api.deps import get_analysis_service
+from src.app.api.deps import get_analysis_service, get_current_user
 from src.app.services.analysis_service import AnalysisResultNotFoundError, AnalysisService
 
-router = APIRouter(prefix="/result", tags=["result"])
+router = APIRouter(
+    prefix="/result",
+    tags=["result"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("", response_model=None)

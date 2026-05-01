@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 
-from src.app.api.deps import get_analysis_service
+from src.app.api.deps import get_analysis_service, get_current_user
 from src.app.schemas.repository import GitHubCloneRequest
 from src.app.services.analysis_service import (
     AnalysisExecutionError,
@@ -17,7 +17,11 @@ from src.app.services.analysis_service import (
     RepositoryArchiveExtractionError,
 )
 
-router = APIRouter(prefix="/analyze", tags=["analyze"])
+router = APIRouter(
+    prefix="/analyze",
+    tags=["analyze"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.post("/file", response_model=None)

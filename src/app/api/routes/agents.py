@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from src.app.api.deps import get_agent_service
+from src.app.api.deps import get_agent_service, get_current_user
 from src.app.core.config import get_settings
 from src.app.schemas.agent import AgentProfileResponse, AgentRunRequest, AgentRunResponse
 from src.app.schemas.repository import GitHubRunRequest
@@ -18,7 +18,11 @@ from src.app.services.analysis_service import (
     RepositoryArchiveExtractionError,
 )
 
-router = APIRouter(prefix="/agents", tags=["agents"])
+router = APIRouter(
+    prefix="/agents",
+    tags=["agents"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.get("/profile", response_model=AgentProfileResponse)

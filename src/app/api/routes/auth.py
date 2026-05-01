@@ -3,14 +3,11 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 import httpx
-import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.app.api.deps import get_auth_service
+from src.app.api.deps import get_auth_service, get_current_user
 from src.app.core.config import get_settings
-from src.app.core.security import decode_access_token
 from src.app.schemas.auth import GithubLoginUrlResponse, TokenResponse, UserResponse
 from src.app.services.auth_service import (
     AuthService,
@@ -18,7 +15,6 @@ from src.app.services.auth_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def build_github_authorization_url() -> str:
@@ -92,27 +88,6 @@ async def github_callback(
         return service.upsert_github_user(user_response.json())
     except InvalidGithubUserError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    service: AuthService = Depends(get_auth_service),
-) -> UserResponse:
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증 토큰이 필요합니다")
-
-    try:
-        payload = decode_access_token(credentials.credentials)
-        user_id = int(payload["sub"])
-    except (jwt.InvalidTokenError, KeyError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않은 토큰입니다") from exc
-
-    user = service.get_user_by_id(user_id)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
-
-    return UserResponse.model_validate(user)
-
 
 @router.get("/me", response_model=UserResponse)
 def me(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
