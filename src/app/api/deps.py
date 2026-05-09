@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session
 
 from src.app.core.security import decode_access_token
 from src.app.core.config import get_settings
-from src.app.db.session import get_db_session
+from src.app.db.session import SessionLocal, get_db_session
 from src.app.schemas.auth import UserResponse
 from src.app.services.agent_service import AgentService
 from src.app.services.analysis_service import AnalysisService
 from src.app.services.analyzer_service import AnalyzerService
 from src.app.services.auth_service import AuthService
-from src.app.services.result_store import AnalysisResultStore
+from src.app.services.job_store import AnalysisJobStore
+from src.app.services.result_store import AnalysisResultStore, DatabaseAnalysisResultStore
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -28,8 +29,13 @@ def get_agent_service() -> AgentService:
 
 
 @lru_cache
-def get_analysis_result_store() -> AnalysisResultStore:
-    return AnalysisResultStore()
+def get_analysis_result_store() -> DatabaseAnalysisResultStore:
+    return DatabaseAnalysisResultStore(SessionLocal)
+
+
+@lru_cache
+def get_analysis_job_store() -> AnalysisJobStore:
+    return AnalysisJobStore()
 
 
 @lru_cache

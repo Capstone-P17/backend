@@ -1,32 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-
-class VulnerabilityFinding(BaseModel):
-    id: str
-    type: str
-    severity: Literal["HIGH", "MEDIUM", "LOW"]
-    file: str
-    line: int
-    function: str | None = None
-    code_snippet: str
-    call_chain: list[str] = Field(default_factory=list)
-    description: str = ""
-
-
-class SecurityScore(BaseModel):
-    overall: int
-    by_file: dict[str, int] = Field(default_factory=dict)
-
-
-class SecurityAnalysisSummary(BaseModel):
-    total_vulnerabilities: int
-    by_severity: dict[str, int] = Field(default_factory=dict)
-    by_type: dict[str, int] = Field(default_factory=dict)
-    score: SecurityScore
+from src.app.schemas.analysis import AnalysisSummary as SecurityAnalysisSummary
+from src.app.schemas.analysis import VulnerabilityFinding
 
 
 class AgentRunRequest(BaseModel):
@@ -59,3 +38,5 @@ class AgentProfileResponse(BaseModel):
     graph_nodes: list[str]
     capabilities: list[str]
     default_target_path: str
+    openai_configured: bool
+    llm_report_available: bool

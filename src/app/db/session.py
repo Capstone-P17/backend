@@ -24,6 +24,6 @@ def get_db_session() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from src.app.models import user  # noqa: F401
+    import src.app.models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

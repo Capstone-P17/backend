@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
 
@@ -51,4 +52,4 @@ def detect_weak_hash(filepath, tree, vuln_counter):
             find_weak_hash(child)
 
     find_weak_hash(tree.root_node)
-    return vulnerabilities
+    return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]

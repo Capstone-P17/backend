@@ -80,9 +80,7 @@ class AnalysisService:
         except Exception as exc:
             raise AnalysisExecutionError("파일 분석 중 오류 발생") from exc
 
-        sanitized_result = self._sanitize_public_result(result)
-        self.result_store.save(sanitized_result)
-        return sanitized_result
+        return self._save_public_result(result)
 
     @contextmanager
     def prepare_uploaded_file(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
@@ -112,9 +110,7 @@ class AnalysisService:
         except Exception as exc:
             raise AnalysisExecutionError("업로드한 레포지토리 분석 중 오류 발생") from exc
 
-        sanitized_result = self._sanitize_public_result(result)
-        self.result_store.save(sanitized_result)
-        return sanitized_result
+        return self._save_public_result(result)
 
     @contextmanager
     def prepare_uploaded_repository(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
@@ -149,9 +145,7 @@ class AnalysisService:
         except Exception as exc:
             raise AnalysisExecutionError("GitHub 레포지토리 분석 중 오류 발생") from exc
 
-        sanitized_result = self._sanitize_public_result(result)
-        self.result_store.save(sanitized_result)
-        return sanitized_result
+        return self._save_public_result(result)
 
     @contextmanager
     def prepare_github_repository(self, url: str) -> Iterator[PreparedAnalysisTarget]:
@@ -215,7 +209,17 @@ class AnalysisService:
         latest_result = self.result_store.get_latest()
         if latest_result is None:
             raise AnalysisResultNotFoundError("분석 결과가 없습니다")
-        return latest_result
+        analysis_id, result = latest_result
+        return self._build_analysis_response(analysis_id, result)
+
+    def get_result(self, analysis_id: str) -> dict[str, object]:
+        result = self.result_store.get(analysis_id)
+        if result is None:
+            raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
+        return self._build_analysis_response(analysis_id, result)
+
+    def list_results(self, limit: int = 20) -> list[dict[str, object]]:
+        return self.result_store.list_results(limit=limit)
 
     @staticmethod
     def _validate_repository_archive_filename(filename: str) -> None:
@@ -260,10 +264,23 @@ class AnalysisService:
                 return nested_root
         return extract_root
 
+    def _save_public_result(self, result: dict[str, object]) -> dict[str, object]:
+        sanitized_result = self._sanitize_public_result(result)
+        analysis_id = self.result_store.save(sanitized_result)
+        return self._build_analysis_response(analysis_id, sanitized_result)
+
+    @staticmethod
+    def _build_analysis_response(analysis_id: str, result: dict[str, object]) -> dict[str, object]:
+        analysis = result.get("analysis_result", {}) if isinstance(result, dict) else {}
+        return {
+            "analysis_id": analysis_id,
+            "analysis_result": analysis,
+        }
+
     @staticmethod
     def _sanitize_public_result(result: dict[str, object]) -> dict[str, object]:
         sanitized = deepcopy(result)
         analysis = sanitized.get("analysis_result", {})
         if isinstance(analysis, dict):
-            analysis.pop("target_path", None)
+            analysis.setdefault("target_path", None)
         return sanitized

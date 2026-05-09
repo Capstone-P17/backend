@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
 
@@ -76,4 +77,4 @@ def detect_insecure_random(filepath, tree, vuln_counter):
         return node.text.decode().strip()
 
     find_insecure_random(tree.root_node)
-    return vulnerabilities
+    return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]

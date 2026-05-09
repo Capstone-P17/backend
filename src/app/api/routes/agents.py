@@ -49,6 +49,8 @@ def get_agent_profile() -> AgentProfileResponse:
             "openai-powered-natural-language-reporting",
         ],
         default_target_path=default_target_path,
+        openai_configured=bool(settings.openai_api_key),
+        llm_report_available=bool(settings.openai_api_key),
     )
 
 

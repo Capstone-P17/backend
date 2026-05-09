@@ -117,7 +117,7 @@ class SecurityAuditGraph:
 
     def _create_llm(self) -> ChatOpenAI:
         if not self.settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is not configured.")
+            raise RuntimeError("LLM 리포트 생성을 위한 OPENAI_API_KEY가 설정되어 있지 않습니다.")
 
         return ChatOpenAI(
             api_key=self.settings.openai_api_key,

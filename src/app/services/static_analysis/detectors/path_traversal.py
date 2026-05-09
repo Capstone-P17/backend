@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
 
@@ -89,4 +90,4 @@ def detect_path_traversal(filepath, tree, vuln_counter):
 
     collect_tainted_vars(tree.root_node)
     find_path_traversal(tree.root_node)
-    return vulnerabilities
+    return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]
