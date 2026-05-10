@@ -218,6 +218,69 @@ class AnalysisService:
             raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
         return self._build_analysis_response(analysis_id, result)
 
+    def get_file_result(self, analysis_id: str, file_id: str) -> dict[str, object]:
+        response = self.get_result(analysis_id)
+        analysis = response.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            raise AnalysisResultNotFoundError("파일 상세 결과를 찾을 수 없습니다")
+
+        findings = analysis.get("vulnerabilities", [])
+        if not isinstance(findings, list):
+            raise AnalysisResultNotFoundError("파일 상세 결과를 찾을 수 없습니다")
+
+        summary = analysis.get("summary", {})
+
+        exact_matches = [
+            finding for finding in findings
+            if isinstance(finding, dict) and str(finding.get("file", "")) == file_id
+        ]
+
+        matched_findings = exact_matches
+        if not matched_findings:
+            matched_findings = [
+                finding for finding in findings
+                if isinstance(finding, dict) and Path(str(finding.get("file", ""))).name == file_id
+            ]
+
+        if not matched_findings:
+            raise AnalysisResultNotFoundError("파일 상세 결과를 찾을 수 없습니다")
+
+        file_score = None
+        file_path = str(matched_findings[0].get("file", file_id))
+        if isinstance(summary, dict):
+            score = summary.get("score", {})
+            if isinstance(score, dict):
+                by_file = score.get("by_file", {})
+                if isinstance(by_file, dict):
+                    raw_score = by_file.get(file_path)
+                    if not isinstance(raw_score, int):
+                        raw_score = by_file.get(Path(file_path).name)
+                    if isinstance(raw_score, int):
+                        file_score = raw_score
+
+        by_type: dict[str, int] = {}
+        by_severity: dict[str, int] = {}
+        for finding in matched_findings:
+            finding_type = str(finding.get("type", "UNKNOWN"))
+            finding_severity = str(finding.get("severity", "UNKNOWN"))
+            by_type[finding_type] = by_type.get(finding_type, 0) + 1
+            by_severity[finding_severity] = by_severity.get(finding_severity, 0) + 1
+
+        return {
+            "analysis_id": analysis_id,
+            "file_id": file_id,
+            "file_path": file_path,
+            "repository": analysis.get("repository", "") if isinstance(analysis, dict) else "",
+            "analyzed_at": analysis.get("analyzed_at", "") if isinstance(analysis, dict) else "",
+            "findings": matched_findings,
+            "summary": {
+                "total_vulnerabilities": len(matched_findings),
+                "by_type": by_type,
+                "by_severity": by_severity,
+                "score": file_score,
+            },
+        }
+
     def list_results(self, limit: int = 20) -> list[dict[str, object]]:
         return self.result_store.list_results(limit=limit)
 

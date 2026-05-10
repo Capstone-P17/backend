@@ -59,6 +59,23 @@ class AnalysisResponse(BaseModel):
     analysis_result: AnalysisResult
 
 
+class FileAnalysisSummary(BaseModel):
+    total_vulnerabilities: int
+    by_type: dict[str, int] = Field(default_factory=dict)
+    by_severity: dict[str, int] = Field(default_factory=dict)
+    score: int | None = None
+
+
+class FileAnalysisResponse(BaseModel):
+    analysis_id: str
+    file_id: str
+    file_path: str
+    repository: str = ""
+    analyzed_at: str
+    findings: list[VulnerabilityFinding] = Field(default_factory=list)
+    summary: FileAnalysisSummary
+
+
 class AnalysisResultListItem(BaseModel):
     analysis_id: str
     repository: str
