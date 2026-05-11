@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from src.app.core.config import PROJECT_ROOT
+from src.app.schemas.analysis import VulnerabilityFinding
 from src.app.services.analyzer_service import AnalyzerService
 
 EXPECTED_TYPES = {
@@ -25,3 +29,30 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
         assert finding["recommendation"]
         assert finding["cwe"]
         assert finding["confidence"] in {"HIGH", "MEDIUM", "LOW"}
+
+
+def test_vulnerability_schema_requires_enriched_fields() -> None:
+    base = {
+        "id": "VULN-001",
+        "type": "SQL_INJECTION",
+        "severity": "HIGH",
+        "file": "UserDAO.java",
+        "line": 10,
+        "function": "findUser",
+        "code_snippet": "stmt.executeQuery(sql)",
+        "call_chain": [],
+        "description": "사용자 입력이 SQL에 직접 결합됩니다.",
+        "cvss": {"score": 7.5, "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
+    }
+
+    for required_field in ("cwe", "recommendation", "safe_example", "confidence"):
+        payload = {
+            **base,
+            "cwe": "CWE-89",
+            "recommendation": "PreparedStatement를 사용하세요.",
+            "safe_example": "PreparedStatement ps = conn.prepareStatement(sql);",
+            "confidence": "HIGH",
+        }
+        payload.pop(required_field)
+        with pytest.raises(ValidationError):
+            VulnerabilityFinding.model_validate(payload)

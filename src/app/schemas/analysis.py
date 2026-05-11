@@ -18,7 +18,7 @@ class VulnerabilityFinding(BaseModel):
     id: str
     type: str
     severity: Severity
-    cwe: str | None = None
+    cwe: str
     cvss: CvssInfo | None = None
     file: str
     line: int | None = None
@@ -26,9 +26,9 @@ class VulnerabilityFinding(BaseModel):
     code_snippet: str | None = None
     call_chain: list[str] = Field(default_factory=list)
     description: str
-    recommendation: str | None = None
-    safe_example: str | None = None
-    confidence: Confidence | None = None
+    recommendation: str
+    safe_example: str
+    confidence: Confidence
 
 
 class SecurityScore(BaseModel):
