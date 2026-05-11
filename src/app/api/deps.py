@@ -1,7 +1,7 @@
 from functools import lru_cache
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -57,14 +57,21 @@ def get_auth_service(db: Session = Depends(get_db_session)) -> AuthService:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     service: AuthService = Depends(get_auth_service),
 ) -> UserResponse:
-    if credentials is None:
+    settings = get_settings()
+    access_token = (
+        credentials.credentials
+        if credentials is not None
+        else request.cookies.get(settings.auth_cookie_name)
+    )
+    if not access_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증 토큰이 필요합니다")
 
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(access_token)
         user_id = int(payload["sub"])
     except (jwt.InvalidTokenError, KeyError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않은 토큰입니다") from exc

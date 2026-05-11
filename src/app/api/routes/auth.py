@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+from secrets import token_urlsafe
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from src.app.api.deps import get_auth_service, get_current_user
 from src.app.core.config import get_settings
-from src.app.schemas.auth import GithubLoginUrlResponse, TokenResponse, UserResponse
+from src.app.schemas.auth import GithubLoginUrlResponse, UserResponse
 from src.app.services.auth_service import (
     AuthService,
     InvalidGithubUserError,
@@ -17,24 +18,67 @@ from src.app.services.auth_service import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def build_github_authorization_url() -> str:
+def build_github_authorization_url(state: str | None = None) -> str:
     settings = get_settings()
-    query = urlencode(
-        {
-            "client_id": settings.github_client_id,
-            "redirect_uri": settings.github_redirect_uri,
-            "scope": "read:user user:email",
-        }
-    )
+    query_params = {
+        "client_id": settings.github_client_id,
+        "redirect_uri": settings.github_redirect_uri,
+        "scope": "read:user user:email",
+    }
+    if state:
+        query_params["state"] = state
+    query = urlencode(query_params)
     return f"{settings.github_authorize_url}?{query}"
 
 
+def _create_oauth_state() -> str:
+    return token_urlsafe(32)
+
+
+def _set_oauth_state_cookie(response: Response, state: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.oauth_state_cookie_name,
+        value=state,
+        max_age=settings.oauth_state_cookie_max_age_seconds,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        path="/",
+    )
+
+
+def _set_access_token_cookie(response: Response, access_token: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=settings.auth_cookie_name,
+        value=access_token,
+        max_age=settings.access_token_expire_minutes * 60,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        path="/",
+    )
+
+
+def _clear_oauth_state_cookie(response: Response) -> None:
+    settings = get_settings()
+    response.delete_cookie(
+        key=settings.oauth_state_cookie_name,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+    )
+
+
 @router.get("/github/login", response_model=GithubLoginUrlResponse)
-def github_login_url() -> GithubLoginUrlResponse:
+def github_login_url(response: Response) -> GithubLoginUrlResponse:
     settings = get_settings()
     if not settings.github_client_id:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="GitHub OAuth 설정이 비어 있습니다")
-    return GithubLoginUrlResponse(authorization_url=build_github_authorization_url())
+    oauth_state = _create_oauth_state()
+    _set_oauth_state_cookie(response, oauth_state)
+    return GithubLoginUrlResponse(authorization_url=build_github_authorization_url(oauth_state))
 
 
 @router.get("/github")
@@ -42,17 +86,28 @@ def github_login_redirect() -> RedirectResponse:
     settings = get_settings()
     if not settings.github_client_id:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="GitHub OAuth 설정이 비어 있습니다")
-    return RedirectResponse(url=build_github_authorization_url(), status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    oauth_state = _create_oauth_state()
+    response = RedirectResponse(
+        url=build_github_authorization_url(oauth_state),
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+    )
+    _set_oauth_state_cookie(response, oauth_state)
+    return response
 
 
-@router.get("/github/callback", response_model=TokenResponse)
+@router.get("/github/callback", response_model=None)
 async def github_callback(
+    request: Request,
     code: str = Query(min_length=1),
+    state: str = Query(min_length=1),
     service: AuthService = Depends(get_auth_service),
-) -> TokenResponse:
+) -> RedirectResponse:
     settings = get_settings()
     if not settings.github_client_id or not settings.github_client_secret:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="GitHub OAuth 설정이 비어 있습니다")
+    oauth_state_cookie = request.cookies.get(settings.oauth_state_cookie_name)
+    if not oauth_state_cookie or oauth_state_cookie != state:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GitHub OAuth state가 올바르지 않습니다")
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         token_response = await client.post(
@@ -85,9 +140,18 @@ async def github_callback(
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub 사용자 조회에 실패했습니다")
 
     try:
-        return service.upsert_github_user(user_response.json())
+        token_response = service.upsert_github_user(user_response.json())
     except InvalidGithubUserError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    response = RedirectResponse(
+        url=settings.frontend_auth_callback_url,
+        status_code=status.HTTP_302_FOUND,
+    )
+    _set_access_token_cookie(response, token_response.access_token)
+    _clear_oauth_state_cookie(response)
+    return response
+
 
 @router.get("/me", response_model=UserResponse)
 def me(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:

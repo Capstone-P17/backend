@@ -84,8 +84,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_TEMPERATURE", "AGENT_OPENAI_TEMPERATURE"),
     )
     allowed_origins: list[str] = Field(
-        default_factory=lambda: ["*"],
+        default_factory=lambda: ["http://localhost:3000"],
         validation_alias=AliasChoices("ALLOWED_ORIGINS", "AGENT_ALLOWED_ORIGINS"),
+    )
+    cors_allow_credentials: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("CORS_ALLOW_CREDENTIALS", "AGENT_CORS_ALLOW_CREDENTIALS"),
     )
     database_url: str = Field(
         default=f"sqlite:///{(PROJECT_ROOT / 'app.db').as_posix()}",
@@ -104,6 +108,39 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices(
             "ACCESS_TOKEN_EXPIRE_MINUTES",
             "AGENT_ACCESS_TOKEN_EXPIRE_MINUTES",
+        ),
+    )
+    frontend_auth_callback_url: str = Field(
+        default="http://localhost:3000/auth/callback",
+        validation_alias=AliasChoices(
+            "FRONTEND_AUTH_CALLBACK_URL",
+            "AGENT_FRONTEND_AUTH_CALLBACK_URL",
+        ),
+    )
+    auth_cookie_name: str = Field(
+        default="access_token",
+        validation_alias=AliasChoices("AUTH_COOKIE_NAME", "AGENT_AUTH_COOKIE_NAME"),
+    )
+    auth_cookie_secure: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("AUTH_COOKIE_SECURE", "AGENT_AUTH_COOKIE_SECURE"),
+    )
+    auth_cookie_samesite: Literal["lax", "strict", "none"] = Field(
+        default="lax",
+        validation_alias=AliasChoices("AUTH_COOKIE_SAMESITE", "AGENT_AUTH_COOKIE_SAMESITE"),
+    )
+    oauth_state_cookie_name: str = Field(
+        default="github_oauth_state",
+        validation_alias=AliasChoices(
+            "OAUTH_STATE_COOKIE_NAME",
+            "AGENT_OAUTH_STATE_COOKIE_NAME",
+        ),
+    )
+    oauth_state_cookie_max_age_seconds: int = Field(
+        default=600,
+        validation_alias=AliasChoices(
+            "OAUTH_STATE_COOKIE_MAX_AGE_SECONDS",
+            "AGENT_OAUTH_STATE_COOKIE_MAX_AGE_SECONDS",
         ),
     )
     github_client_id: str = Field(
