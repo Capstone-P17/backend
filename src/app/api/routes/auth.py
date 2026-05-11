@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from src.app.api.deps import get_auth_service, get_current_user
 from src.app.core.config import get_settings
@@ -156,3 +156,22 @@ async def github_callback(
 @router.get("/me", response_model=UserResponse)
 def me(current_user: UserResponse = Depends(get_current_user)) -> UserResponse:
     return current_user
+
+
+@router.post("/logout")
+def logout() -> JSONResponse:
+    settings = get_settings()
+    response = JSONResponse(content={"message": "로그아웃되었습니다"})
+    response.delete_cookie(
+        key=settings.auth_cookie_name,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+    )
+    response.delete_cookie(
+        key=settings.oauth_state_cookie_name,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+    )
+    return response
