@@ -13,6 +13,9 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description="LangGraph-enabled FastAPI backend for AI-driven security audit workflows.",
+        docs_url="/docs" if settings.docs_enabled else None,
+        redoc_url="/redoc" if settings.docs_enabled else None,
+        openapi_url="/openapi.json" if settings.docs_enabled else None,
     )
 
     app.add_middleware(
@@ -31,10 +34,12 @@ def create_app() -> FastAPI:
 
     @app.get("/", tags=["meta"])
     def read_root() -> dict[str, str]:
-        return {
+        payload = {
             "message": f"{settings.app_name} is running",
-            "docs": "/docs",
             "api_prefix": settings.api_prefix,
         }
+        if settings.docs_enabled:
+            payload["docs"] = "/docs"
+        return payload
 
     return app

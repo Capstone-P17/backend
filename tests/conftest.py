@@ -25,6 +25,7 @@ from src.app.services.result_store import AnalysisResultStore
 @pytest.fixture(autouse=True)
 def clear_dependency_caches(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-with-at-least-32-bytes")
     get_settings.cache_clear()
     deps.get_agent_service.cache_clear()
     deps.get_analysis_result_store.cache_clear()

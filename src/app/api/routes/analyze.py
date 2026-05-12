@@ -6,6 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile, statu
 from fastapi.responses import JSONResponse
 
 from src.app.api.deps import get_analysis_job_store, get_analysis_service, get_current_user
+from src.app.api.upload import read_upload_with_limit
+from src.app.core.config import get_settings
 from src.app.schemas.analysis import AnalysisResponse
 from src.app.schemas.jobs import AnalysisJobCreateResponse, AnalysisJobStatusResponse
 from src.app.schemas.repository import GitHubCloneRequest
@@ -17,6 +19,7 @@ from src.app.services.analysis_service import (
     InvalidJavaFileError,
     InvalidRepositoryArchiveError,
     RepositoryArchiveExtractionError,
+    UploadTooLargeError,
 )
 from src.app.services.job_store import AnalysisJobStore
 
@@ -55,8 +58,10 @@ async def analyze_file(
         return JSONResponse(status_code=422, content={"error": "파일을 첨부해주세요"})
 
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
         return service.analyze_uploaded_file(filename=file.filename, content=content)
+    except UploadTooLargeError as exc:
+        return JSONResponse(status_code=413, content={"error": str(exc)})
     except InvalidJavaFileError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
     except AnalysisExecutionError as exc:
@@ -72,8 +77,10 @@ async def analyze_uploaded_archive(
         return JSONResponse(status_code=422, content={"error": "레포지토리 압축 파일을 첨부해주세요"})
 
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
         return service.analyze_uploaded_repository(filename=file.filename, content=content)
+    except UploadTooLargeError as exc:
+        return JSONResponse(status_code=413, content={"error": str(exc)})
     except InvalidRepositoryArchiveError as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
     except RepositoryArchiveExtractionError as exc:
@@ -89,6 +96,8 @@ async def analyze_github_repository(
 ) -> dict[str, Any] | JSONResponse:
     try:
         return service.analyze_github_repository(url=body.url)
+    except UploadTooLargeError as exc:
+        return JSONResponse(status_code=413, content={"error": str(exc)})
     except (InvalidGitHubRepositoryError, InvalidRepositoryArchiveError) as exc:
         return JSONResponse(status_code=400, content={"error": str(exc)})
     except GitHubRepositoryCloneError as exc:

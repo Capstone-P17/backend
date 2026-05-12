@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from src.app.api.deps import get_agent_service, get_current_user
+from src.app.api.upload import read_upload_with_limit
 from src.app.core.config import get_settings
 from src.app.schemas.agent import AgentProfileResponse, AgentRunRequest, AgentRunResponse
 from src.app.schemas.repository import GitHubRunRequest
@@ -16,6 +17,7 @@ from src.app.services.analysis_service import (
     InvalidJavaFileError,
     InvalidRepositoryArchiveError,
     RepositoryArchiveExtractionError,
+    UploadTooLargeError,
 )
 
 router = APIRouter(
@@ -81,7 +83,7 @@ async def run_agent_with_uploaded_file(
         raise HTTPException(status_code=422, detail="파일을 첨부해주세요")
 
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
         return service.run_uploaded_file(
             filename=file.filename,
             content=content,
@@ -89,6 +91,8 @@ async def run_agent_with_uploaded_file(
             instructions=instructions or "",
             include_raw_analysis=include_raw_analysis,
         )
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except InvalidJavaFileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except AnalysisExecutionError as exc:
@@ -109,7 +113,7 @@ async def run_agent_with_uploaded_repository(
         raise HTTPException(status_code=422, detail="레포지토리 압축 파일을 첨부해주세요")
 
     try:
-        content = await file.read()
+        content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
         return service.run_uploaded_repository(
             filename=file.filename,
             content=content,
@@ -117,6 +121,8 @@ async def run_agent_with_uploaded_repository(
             instructions=instructions or "",
             include_raw_analysis=include_raw_analysis,
         )
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except InvalidRepositoryArchiveError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RepositoryArchiveExtractionError as exc:
@@ -139,6 +145,8 @@ async def run_agent_with_github_repository(
             instructions=body.instructions or "",
             include_raw_analysis=body.include_raw_analysis,
         )
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except (InvalidGitHubRepositoryError, InvalidRepositoryArchiveError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GitHubRepositoryCloneError as exc:

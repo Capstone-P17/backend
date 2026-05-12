@@ -7,7 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 import httpx
 
@@ -48,6 +48,10 @@ class AnalysisExecutionError(RuntimeError):
     pass
 
 
+class UploadTooLargeError(ValueError):
+    pass
+
+
 class AnalysisResultNotFoundError(LookupError):
     pass
 
@@ -80,6 +84,8 @@ class AnalysisService:
                 result = self.analyzer_service.analyze(prepared_target.target_path)
         except InvalidJavaFileError:
             raise
+        except UploadTooLargeError:
+            raise
         except Exception as exc:
             raise AnalysisExecutionError("파일 분석 중 오류 발생") from exc
 
@@ -87,6 +93,7 @@ class AnalysisService:
 
     @contextmanager
     def prepare_uploaded_file(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
+        self._validate_upload_size(len(content))
         normalized_name = Path(filename).name
         if Path(normalized_name).suffix.lower() != ".java":
             raise InvalidJavaFileError("Java 파일만 분석 가능합니다")
@@ -110,6 +117,8 @@ class AnalysisService:
             raise
         except RepositoryArchiveExtractionError:
             raise
+        except UploadTooLargeError:
+            raise
         except Exception as exc:
             raise AnalysisExecutionError("업로드한 레포지토리 분석 중 오류 발생") from exc
 
@@ -117,6 +126,7 @@ class AnalysisService:
 
     @contextmanager
     def prepare_uploaded_repository(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
+        self._validate_upload_size(len(content))
         archive_name = Path(filename).name
         if not archive_name:
             raise InvalidRepositoryArchiveError("레포지토리 압축 파일을 첨부해주세요")
@@ -143,7 +153,12 @@ class AnalysisService:
                     prepared_target.target_path,
                     repository=prepared_target.repository,
                 )
-        except (InvalidGitHubRepositoryError, GitHubRepositoryCloneError, InvalidRepositoryArchiveError):
+        except (
+            InvalidGitHubRepositoryError,
+            GitHubRepositoryCloneError,
+            InvalidRepositoryArchiveError,
+            UploadTooLargeError,
+        ):
             raise
         except Exception as exc:
             raise AnalysisExecutionError("GitHub 레포지토리 분석 중 오류 발생") from exc
@@ -187,6 +202,7 @@ class AnalysisService:
                 with httpx.Client(follow_redirects=True, timeout=_CLONE_TIMEOUT_SECONDS) as client:
                     response = client.get(archive_url)
                 if response.status_code == 200:
+                    self._validate_upload_size(len(response.content))
                     return response.content, branch
                 if response.status_code == 404:
                     continue
@@ -293,12 +309,19 @@ class AnalysisService:
         if not filename.lower().endswith(allowed_suffixes):
             raise InvalidRepositoryArchiveError("ZIP 형식의 레포지토리 압축 파일만 업로드 가능합니다")
 
+    def _validate_upload_size(self, size_bytes: int) -> None:
+        if size_bytes > self.settings.max_upload_bytes:
+            raise UploadTooLargeError(
+                f"업로드 크기는 최대 {self.settings.max_upload_bytes // (1024 * 1024)}MB까지 허용됩니다"
+            )
+
     def _extract_repository_archive(self, archive_path: Path, extract_root: Path) -> None:
         try:
             with ZipFile(archive_path) as archive_file:
                 members = archive_file.infolist()
                 if not members:
                     raise InvalidRepositoryArchiveError("압축 파일이 비어 있습니다")
+                self._validate_archive_limits(members)
                 for member in members:
                     self._validate_archive_member_path(member.filename)
                 archive_file.extractall(extract_root)
@@ -308,6 +331,19 @@ class AnalysisService:
             raise
         except OSError as exc:
             raise RepositoryArchiveExtractionError("레포지토리 압축 해제 실패") from exc
+
+    def _validate_archive_limits(self, members: list[ZipInfo]) -> None:
+        file_members = [member for member in members if not member.is_dir()]
+        if len(file_members) > self.settings.max_archive_members:
+            raise InvalidRepositoryArchiveError(
+                f"압축 파일 내부 파일 수는 최대 {self.settings.max_archive_members}개까지 허용됩니다"
+            )
+
+        total_uncompressed_bytes = sum(member.file_size for member in file_members)
+        if total_uncompressed_bytes > self.settings.max_upload_bytes:
+            raise InvalidRepositoryArchiveError(
+                f"압축 해제 후 크기는 최대 {self.settings.max_upload_bytes // (1024 * 1024)}MB까지 허용됩니다"
+            )
 
     @staticmethod
     def _validate_archive_member_path(member_name: str) -> None:

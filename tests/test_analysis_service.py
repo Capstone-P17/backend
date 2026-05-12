@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from io import BytesIO
-from zipfile import ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile
+
+import pytest
 
 from src.app.core.config import get_settings
-from src.app.services.analysis_service import AnalysisService
+from src.app.services.analysis_service import AnalysisService, InvalidRepositoryArchiveError, UploadTooLargeError
 from src.app.services.analyzer_service import AnalyzerService
 from src.app.services.result_store import AnalysisResultStore
 
@@ -17,6 +19,13 @@ def zip_bytes() -> bytes:
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
         archive.writestr("repo/Safe.java", java_bytes())
+    return buffer.getvalue()
+
+
+def oversized_zip_bytes() -> bytes:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("repo/Oversized.java", b"a" * 1024)
     return buffer.getvalue()
 
 
@@ -34,6 +43,30 @@ def test_uploaded_file_returns_analysis_id_envelope(analysis_service: AnalysisSe
 
 def test_uploaded_repository_returns_analysis_id_envelope(analysis_service: AnalysisService) -> None:
     assert_analysis_response(analysis_service.analyze_uploaded_repository("repo.zip", zip_bytes()))
+
+
+def test_uploaded_file_rejects_configured_size_limit() -> None:
+    settings = get_settings().model_copy(update={"max_upload_bytes": 8})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+
+    with pytest.raises(UploadTooLargeError):
+        service.analyze_uploaded_file("Safe.java", java_bytes())
+
+
+def test_uploaded_repository_rejects_uncompressed_zip_limit() -> None:
+    settings = get_settings().model_copy(update={"max_upload_bytes": 512})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+
+    with pytest.raises(InvalidRepositoryArchiveError):
+        service.analyze_uploaded_repository("repo.zip", oversized_zip_bytes())
 
 
 def test_github_repository_returns_analysis_id_envelope_without_network(monkeypatch, analysis_service: AnalysisService) -> None:

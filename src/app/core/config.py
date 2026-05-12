@@ -1,8 +1,9 @@
+import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -13,6 +14,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "to write a concise but actionable Korean report for developers."
 )
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+DEFAULT_MAX_ARCHIVE_MEMBERS = 5000
 
 
 class Settings(BaseSettings):
@@ -48,6 +51,9 @@ class Settings(BaseSettings):
     reload: bool = Field(
         default=False, validation_alias=AliasChoices("RELOAD", "AGENT_RELOAD")
     )
+    docs_enabled: bool = Field(
+        default=True, validation_alias=AliasChoices("DOCS_ENABLED", "AGENT_DOCS_ENABLED")
+    )
 
     workspace_root: Path = Field(
         default=PROJECT_ROOT,
@@ -65,6 +71,16 @@ class Settings(BaseSettings):
             "ANALYSIS_MAX_FINDINGS_IN_PROMPT",
             "AGENT_ANALYSIS_MAX_FINDINGS_IN_PROMPT",
         ),
+    )
+    max_upload_bytes: int = Field(
+        default=DEFAULT_MAX_UPLOAD_BYTES,
+        ge=1,
+        validation_alias=AliasChoices("MAX_UPLOAD_BYTES", "AGENT_MAX_UPLOAD_BYTES"),
+    )
+    max_archive_members: int = Field(
+        default=DEFAULT_MAX_ARCHIVE_MEMBERS,
+        ge=1,
+        validation_alias=AliasChoices("MAX_ARCHIVE_MEMBERS", "AGENT_MAX_ARCHIVE_MEMBERS"),
     )
 
     default_agent_name: str = Field(
@@ -96,7 +112,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DATABASE_URL", "AGENT_DATABASE_URL"),
     )
     jwt_secret_key: str = Field(
-        default="change-this-secret-in-production",
+        default="",
         validation_alias=AliasChoices("JWT_SECRET_KEY", "AGENT_JWT_SECRET_KEY"),
     )
     jwt_algorithm: str = Field(
@@ -176,6 +192,36 @@ class Settings(BaseSettings):
         default="https://api.github.com/user",
         validation_alias=AliasChoices("GITHUB_USER_API_URL", "AGENT_GITHUB_USER_API_URL"),
     )
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+
+        stripped = value.strip()
+        if not stripped:
+            return []
+
+        if stripped.startswith("["):
+            return json.loads(stripped)
+
+        return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+
+    @model_validator(mode="after")
+    def validate_deployment_security(self) -> "Settings":
+        if len(self.jwt_secret_key.encode("utf-8")) < 32:
+            raise ValueError("JWT_SECRET_KEY must be set to at least 32 bytes.")
+
+        if self.environment == "prod":
+            if self.cors_allow_credentials and "*" in self.allowed_origins:
+                raise ValueError(
+                    "ALLOWED_ORIGINS must not contain '*' when CORS_ALLOW_CREDENTIALS=true in prod."
+                )
+            if not self.auth_cookie_secure:
+                raise ValueError("AUTH_COOKIE_SECURE must be true in prod.")
+
+        return self
 
     @property
     def default_system_prompt(self) -> str:

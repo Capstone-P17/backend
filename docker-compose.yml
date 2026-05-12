@@ -5,32 +5,6 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-backend-user}:${POSTGRES_PASSWORD:-backend-password}@db:5432/${POSTGRES_DB:-backend-db}
-    depends_on:
-      db:
-        condition: service_healthy
     ports:
       - "8000:8000"
     restart: unless-stopped
-
-  db:
-    image: postgres:16
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-backend-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-backend-password}
-      POSTGRES_DB: ${POSTGRES_DB:-backend-db}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-backend-user} -d ${POSTGRES_DB:-backend-db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    ports:
-      - "5432:5432"
-    restart: unless-stopped
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-
-volumes:
-  postgres-data:
-
