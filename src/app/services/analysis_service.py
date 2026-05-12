@@ -13,6 +13,7 @@ import httpx
 
 from src.app.core.config import Settings
 from src.app.services.analyzer_service import AnalyzerService
+from src.app.services.llm_report_service import SecurityReportGenerator
 from src.app.services.result_store import AnalysisResultStore
 
 _GITHUB_REPO_URL_RE = re.compile(
@@ -66,10 +67,12 @@ class AnalysisService:
         settings: Settings,
         analyzer_service: AnalyzerService,
         result_store: AnalysisResultStore,
+        report_generator: SecurityReportGenerator | None = None,
     ) -> None:
         self.settings = settings
         self.analyzer_service = analyzer_service
         self.result_store = result_store
+        self.report_generator = report_generator or SecurityReportGenerator(settings)
 
     def analyze_uploaded_file(self, filename: str, content: bytes) -> dict[str, object]:
         try:
@@ -329,6 +332,7 @@ class AnalysisService:
 
     def _save_public_result(self, result: dict[str, object]) -> dict[str, object]:
         sanitized_result = self._sanitize_public_result(result)
+        self._attach_llm_report(sanitized_result)
         analysis_id = self.result_store.save(sanitized_result)
         return self._build_analysis_response(analysis_id, sanitized_result)
 
@@ -347,3 +351,31 @@ class AnalysisService:
         if isinstance(analysis, dict):
             analysis.setdefault("target_path", None)
         return sanitized
+
+    def _attach_llm_report(self, result: dict[str, object]) -> None:
+        analysis = result.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return
+
+        llm_available = self.report_generator.is_available
+        analysis["llm_report_available"] = llm_available
+        analysis["llm_model"] = self.settings.openai_model if llm_available else None
+        analysis.setdefault("llm_report", None)
+        analysis.setdefault("llm_report_error", None)
+
+        if not llm_available:
+            analysis["llm_report_status"] = "unavailable"
+            return
+
+        try:
+            analysis["llm_report"] = self.report_generator.generate(
+                result=result,
+                target_path=str(analysis.get("target_path") or ""),
+                repository=str(analysis.get("repository") or ""),
+            )
+            analysis["llm_report_status"] = "generated"
+            analysis["llm_report_error"] = None
+        except Exception as exc:  # noqa: BLE001 - static results should survive LLM outages
+            analysis["llm_report"] = None
+            analysis["llm_report_status"] = "failed"
+            analysis["llm_report_error"] = str(exc) or "LLM 리포트 생성에 실패했습니다."

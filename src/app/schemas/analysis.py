@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 Confidence = Literal["HIGH", "MEDIUM", "LOW"]
+LLMReportStatus = Literal["unavailable", "generated", "failed"]
 
 
 class CvssInfo(BaseModel):
@@ -52,6 +53,11 @@ class AnalysisResult(BaseModel):
     vulnerabilities: list[VulnerabilityFinding] = Field(default_factory=list)
     call_graph: dict[str, list[str]] = Field(default_factory=dict)
     summary: AnalysisSummary
+    llm_report: str | None = None
+    llm_report_status: LLMReportStatus = "unavailable"
+    llm_report_available: bool = False
+    llm_report_error: str | None = None
+    llm_model: str | None = None
 
 
 class AnalysisResponse(BaseModel):
