@@ -80,7 +80,7 @@ def configure_auth_env(monkeypatch, *, secure: bool = True) -> None:
     monkeypatch.setenv("GITHUB_CLIENT_ID", "client-id")
     monkeypatch.setenv("GITHUB_CLIENT_SECRET", "client-secret")
     monkeypatch.setenv("GITHUB_REDIRECT_URI", "http://localhost:8000/auth/github/callback")
-    monkeypatch.setenv("FRONTEND_AUTH_CALLBACK_URL", "http://localhost:3000/auth/callback")
+    monkeypatch.setenv("FRONTEND_AUTH_CALLBACK_URL", "http://localhost:3000/")
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "true" if secure else "false")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-with-at-least-32-bytes")
     get_settings.cache_clear()
@@ -126,7 +126,7 @@ def test_github_callback_redirects_to_frontend_with_http_only_access_cookie(monk
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == "http://localhost:3000/auth/callback"
+    assert response.headers["location"] == "http://localhost:3000/?auth=success"
     set_cookies = response.headers.get_list("set-cookie")
     access_cookie = next(cookie for cookie in set_cookies if cookie.startswith("access_token="))
     assert "jwt-token" in access_cookie
@@ -146,8 +146,18 @@ def test_github_callback_rejects_invalid_oauth_state(monkeypatch) -> None:
         follow_redirects=False,
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "GitHub OAuth state가 올바르지 않습니다"
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://localhost:3000/?auth_error=auth_failed"
+    set_cookies = response.headers.get_list("set-cookie")
+    assert any(cookie.startswith("github_oauth_state=") and "Max-Age=0" in cookie for cookie in set_cookies)
+
+
+def test_frontend_auth_redirect_preserves_existing_callback_query(monkeypatch) -> None:
+    configure_auth_env(monkeypatch, secure=True)
+    monkeypatch.setenv("FRONTEND_AUTH_CALLBACK_URL", "http://localhost:3000/?from=github")
+    get_settings.cache_clear()
+
+    assert auth_routes._frontend_redirect_url(auth="success") == "http://localhost:3000/?from=github&auth=success"
 
 
 def test_me_accepts_http_only_cookie_token(monkeypatch) -> None:

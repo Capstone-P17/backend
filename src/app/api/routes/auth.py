@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from secrets import token_urlsafe
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -71,6 +71,31 @@ def _clear_oauth_state_cookie(response: Response) -> None:
     )
 
 
+def _frontend_redirect_url(**params: str) -> str:
+    settings = get_settings()
+    parsed = urlsplit(settings.frontend_auth_callback_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update(params)
+    return urlunsplit(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(query),
+            parsed.fragment,
+        )
+    )
+
+
+def _redirect_to_frontend_auth_error(error: str = "auth_failed") -> RedirectResponse:
+    response = RedirectResponse(
+        url=_frontend_redirect_url(auth_error=error),
+        status_code=status.HTTP_302_FOUND,
+    )
+    _clear_oauth_state_cookie(response)
+    return response
+
+
 @router.get("/github/login", response_model=GithubLoginUrlResponse)
 def github_login_url(response: Response) -> GithubLoginUrlResponse:
     settings = get_settings()
@@ -104,48 +129,48 @@ async def github_callback(
 ) -> RedirectResponse:
     settings = get_settings()
     if not settings.github_client_id or not settings.github_client_secret:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="GitHub OAuth 설정이 비어 있습니다")
+        return _redirect_to_frontend_auth_error()
     oauth_state_cookie = request.cookies.get(settings.oauth_state_cookie_name)
     if not oauth_state_cookie or oauth_state_cookie != state:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GitHub OAuth state가 올바르지 않습니다")
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        token_response = await client.post(
-            settings.github_token_url,
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": settings.github_client_id,
-                "client_secret": settings.github_client_secret,
-                "code": code,
-                "redirect_uri": settings.github_redirect_uri,
-            },
-        )
-        if token_response.status_code >= 400:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub 토큰 발급에 실패했습니다")
-
-        token_payload = token_response.json()
-        github_access_token = token_payload.get("access_token")
-        if not isinstance(github_access_token, str) or not github_access_token:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub access token이 없습니다")
-
-        user_response = await client.get(
-            settings.github_user_api_url,
-            headers={
-                "Accept": "application/json",
-                "Authorization": f"Bearer {github_access_token}",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-        if user_response.status_code >= 400:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub 사용자 조회에 실패했습니다")
+        return _redirect_to_frontend_auth_error()
 
     try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            token_response = await client.post(
+                settings.github_token_url,
+                headers={"Accept": "application/json"},
+                data={
+                    "client_id": settings.github_client_id,
+                    "client_secret": settings.github_client_secret,
+                    "code": code,
+                    "redirect_uri": settings.github_redirect_uri,
+                },
+            )
+            if token_response.status_code >= 400:
+                return _redirect_to_frontend_auth_error()
+
+            token_payload = token_response.json()
+            github_access_token = token_payload.get("access_token")
+            if not isinstance(github_access_token, str) or not github_access_token:
+                return _redirect_to_frontend_auth_error()
+
+            user_response = await client.get(
+                settings.github_user_api_url,
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {github_access_token}",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            if user_response.status_code >= 400:
+                return _redirect_to_frontend_auth_error()
+
         token_response = service.upsert_github_user(user_response.json())
-    except InvalidGithubUserError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except (httpx.HTTPError, InvalidGithubUserError, ValueError):
+        return _redirect_to_frontend_auth_error()
 
     response = RedirectResponse(
-        url=settings.frontend_auth_callback_url,
+        url=_frontend_redirect_url(auth="success"),
         status_code=status.HTTP_302_FOUND,
     )
     _set_access_token_cookie(response, token_response.access_token)
