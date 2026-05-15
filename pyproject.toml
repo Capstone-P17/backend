@@ -23,6 +23,7 @@ dependencies = [
     "tree-sitter-java>=0.23.0",
     "urllib3>=2.7.0",
     "uvicorn>=0.42.0",
+    "reportlab>=4.5.1",
 ]
 
 [dependency-groups]

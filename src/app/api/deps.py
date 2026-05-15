@@ -14,6 +14,7 @@ from src.app.services.analysis_service import AnalysisService
 from src.app.services.analyzer_service import AnalyzerService
 from src.app.services.auth_service import AuthService
 from src.app.services.job_store import AnalysisJobStore
+from src.app.services.report_service import ReportService
 from src.app.services.result_store import AnalysisResultStore, DatabaseAnalysisResultStore
 
 
@@ -49,6 +50,15 @@ def get_analysis_service() -> AnalysisService:
         settings=get_settings(),
         analyzer_service=get_analyzer_service(),
         result_store=get_analysis_result_store(),
+    )
+
+
+def get_report_service(
+    analysis_service: AnalysisService = Depends(get_analysis_service),
+) -> ReportService:
+    return ReportService(
+        settings=get_settings(),
+        analysis_service=analysis_service,
     )
 
 
