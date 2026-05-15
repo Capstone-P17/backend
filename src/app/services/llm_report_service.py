@@ -51,7 +51,9 @@ class SecurityReportGenerator:
 3. 우선순위별 대응 방안
 4. 다음 단계
 
-각 취약점 설명에는 위험도, 악용 가능성, 개발자가 바로 적용할 수 있는 수정 방향을 포함하라.
+각 취약점 설명에는 위험도, 악용 가능성, 발견 위치, 개발자가 바로 적용할 수 있는 수정 방향을 포함하라.
+수정 방향은 추상적인 권고에 그치지 말고, 해당 취약점 유형에 맞는 구체적인 개선 방법을 1~2문장으로 작성하라.
+예를 들어 SQL 인젝션은 파라미터 바인딩 또는 PreparedStatement 사용, 하드코딩된 비밀값은 환경 변수나 시크릿 저장소 사용, 약한 해시는 더 안전한 해시 또는 비밀번호 전용 KDF 사용 방향을 우선 제시하라.
 """.strip(),
                 ),
             ]
@@ -90,9 +92,29 @@ class SecurityReportGenerator:
             "language": analysis.get("language", "java"),
             "files_analyzed": analysis.get("files_analyzed", 0),
             "summary": analysis.get("summary", {}),
-            "vulnerabilities": selected_vulnerabilities,
+            "vulnerabilities": self._build_vulnerability_briefs(selected_vulnerabilities),
             "call_graph_excerpt": selected_call_graph,
         }
+
+    @staticmethod
+    def _build_vulnerability_briefs(vulnerabilities: list[Any]) -> list[dict[str, Any]]:
+        briefs: list[dict[str, Any]] = []
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            briefs.append(
+                {
+                    "type": finding.get("type"),
+                    "severity": finding.get("severity"),
+                    "file": finding.get("file"),
+                    "line": finding.get("line"),
+                    "function": finding.get("function"),
+                    "description": finding.get("description"),
+                    "recommendation": finding.get("recommendation"),
+                    "call_chain": finding.get("call_chain", []),
+                }
+            )
+        return briefs
 
     @staticmethod
     def _coerce_content(content: Any) -> str:

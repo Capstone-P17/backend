@@ -8,6 +8,7 @@ import pytest
 from src.app.core.config import get_settings
 from src.app.services.analysis_service import AnalysisService, InvalidRepositoryArchiveError, UploadTooLargeError
 from src.app.services.analyzer_service import AnalyzerService
+from src.app.services.llm_report_service import SecurityReportGenerator
 from src.app.services.result_store import AnalysisResultStore
 
 
@@ -38,11 +39,11 @@ def assert_analysis_response(response: dict) -> None:
 
 
 def test_uploaded_file_returns_analysis_id_envelope(analysis_service: AnalysisService) -> None:
-    assert_analysis_response(analysis_service.analyze_uploaded_file("Safe.java", java_bytes()))
+    assert_analysis_response(analysis_service.analyze_uploaded_file("Safe.java", java_bytes(), user_id=1))
 
 
 def test_uploaded_repository_returns_analysis_id_envelope(analysis_service: AnalysisService) -> None:
-    assert_analysis_response(analysis_service.analyze_uploaded_repository("repo.zip", zip_bytes()))
+    assert_analysis_response(analysis_service.analyze_uploaded_repository("repo.zip", zip_bytes(), user_id=1))
 
 
 def test_uploaded_file_rejects_configured_size_limit() -> None:
@@ -54,7 +55,7 @@ def test_uploaded_file_rejects_configured_size_limit() -> None:
     )
 
     with pytest.raises(UploadTooLargeError):
-        service.analyze_uploaded_file("Safe.java", java_bytes())
+        service.analyze_uploaded_file("Safe.java", java_bytes(), user_id=1)
 
 
 def test_uploaded_repository_rejects_uncompressed_zip_limit() -> None:
@@ -66,12 +67,12 @@ def test_uploaded_repository_rejects_uncompressed_zip_limit() -> None:
     )
 
     with pytest.raises(InvalidRepositoryArchiveError):
-        service.analyze_uploaded_repository("repo.zip", oversized_zip_bytes())
+        service.analyze_uploaded_repository("repo.zip", oversized_zip_bytes(), user_id=1)
 
 
 def test_github_repository_returns_analysis_id_envelope_without_network(monkeypatch, analysis_service: AnalysisService) -> None:
     monkeypatch.setattr(analysis_service, "_download_github_archive", lambda owner, repo: (zip_bytes(), "main"))
-    assert_analysis_response(analysis_service.analyze_github_repository("https://github.com/acme/repo"))
+    assert_analysis_response(analysis_service.analyze_github_repository("https://github.com/acme/repo", user_id=1))
 
 
 def test_analysis_result_includes_generated_llm_report_when_available() -> None:
@@ -93,11 +94,55 @@ def test_analysis_result_includes_generated_llm_report_when_available() -> None:
         report_generator=FakeReportGenerator(),  # type: ignore[arg-type]
     )
 
-    response = service.analyze_uploaded_file("Safe.java", java_bytes())
+    response = service.analyze_uploaded_file("Safe.java", java_bytes(), user_id=1)
     analysis = response["analysis_result"]
 
     assert analysis["llm_report_status"] == "generated"
     assert analysis["llm_report"] == "LLM 리포트 본문"
     assert analysis["llm_report_available"] is True
     assert analysis["llm_model"] == "test-model"
-    assert result_store.get(response["analysis_id"])["analysis_result"]["llm_report"] == "LLM 리포트 본문"
+    assert result_store.get(response["analysis_id"], user_id=1)["analysis_result"]["llm_report"] == "LLM 리포트 본문"
+
+
+def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
+    settings = get_settings().model_copy(update={"analysis_max_findings_in_prompt": 5})
+    generator = SecurityReportGenerator(settings)
+
+    payload = generator._build_payload(
+        {
+            "analysis_result": {
+                "repository": "repo",
+                "target_path": "src",
+                "language": "java",
+                "files_analyzed": 1,
+                "summary": {"total_vulnerabilities": 1},
+                "call_graph": {"A.run": ["B.exec"]},
+                "vulnerabilities": [
+                    {
+                        "type": "SQL_INJECTION",
+                        "severity": "HIGH",
+                        "file": "src/LoginService.java",
+                        "line": 12,
+                        "function": "authenticate",
+                        "description": "사용자 입력이 그대로 SQL에 연결됩니다.",
+                        "recommendation": "PreparedStatement를 사용하세요.",
+                        "call_chain": ["AuthController.login", "LoginService.authenticate"],
+                        "code_snippet": "String query = ...",
+                    }
+                ],
+            }
+        }
+    )
+
+    assert payload["vulnerabilities"] == [
+        {
+            "type": "SQL_INJECTION",
+            "severity": "HIGH",
+            "file": "src/LoginService.java",
+            "line": 12,
+            "function": "authenticate",
+            "description": "사용자 입력이 그대로 SQL에 연결됩니다.",
+            "recommendation": "PreparedStatement를 사용하세요.",
+            "call_chain": ["AuthController.login", "LoginService.authenticate"],
+        }
+    ]
