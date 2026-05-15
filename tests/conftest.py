@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 import pytest
 from fastapi.testclient import TestClient
 
+import src.app.factory as factory_module
 from src.app.api import deps
 from src.app.api.deps import get_analysis_job_store, get_analysis_service, get_current_user
 from src.app.core.config import get_settings
@@ -62,7 +63,12 @@ def analysis_service(result_store: AnalysisResultStore) -> AnalysisService:
 
 
 @pytest.fixture
-def client(analysis_service: AnalysisService, job_store: AnalysisJobStore) -> Iterator[TestClient]:
+def client(
+    analysis_service: AnalysisService,
+    job_store: AnalysisJobStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[TestClient]:
+    monkeypatch.setattr(factory_module, "init_db", lambda: None)
     app = create_app()
 
     def fake_current_user() -> UserResponse:
@@ -85,7 +91,8 @@ def client(analysis_service: AnalysisService, job_store: AnalysisJobStore) -> It
 
 
 @pytest.fixture
-def unauthenticated_client() -> Iterator[TestClient]:
+def unauthenticated_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    monkeypatch.setattr(factory_module, "init_db", lambda: None)
     app = create_app()
     with TestClient(app) as test_client:
         yield test_client
