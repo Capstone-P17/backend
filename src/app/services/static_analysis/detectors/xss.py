@@ -7,11 +7,23 @@ from src.app.services.static_analysis.parser import find_parent_class, find_pare
 INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
 OUTPUT_METHODS = ["println", "print", "write", "append"]
 HTML_FRAGMENTS = ["<", ">", "</", "/>", "<h1", "<div", "<span", "<p", "<script", "<img", "<a "]
+SANITIZER_METHODS = [
+    "escapeHtml",
+    "escapeHtml4",
+    "escapeHtml3",
+    "htmlEscape",
+    "forHtml",
+    "forHtmlContent",
+    "forHtmlAttribute",
+    "clean",
+    "sanitize",
+]
 
 
 def detect_xss(filepath, tree, vuln_counter):
     vulnerabilities = []
     user_input_vars = {}
+    sanitized_vars = set()
 
     def collect_user_inputs(node):
         if node.type in ("local_variable_declaration", "field_declaration"):
@@ -24,6 +36,12 @@ def detect_xss(filepath, tree, vuln_counter):
                             "line": name_node.start_point[0] + 1,
                             "code": node.text.decode().strip(),
                         }
+                    if name_node and value_node and contains_sanitizer(value_node):
+                        sanitized_vars.add(name_node.text.decode())
+        if node.type == "assignment_expression" and contains_sanitizer(node):
+            left = node.child_by_field_name("left")
+            if left:
+                sanitized_vars.add(left.text.decode())
         for child in node.children:
             collect_user_inputs(child)
 
@@ -37,6 +55,16 @@ def detect_xss(filepath, tree, vuln_counter):
                 return True
         return False
 
+    def contains_sanitizer(node):
+        if node.type == "method_invocation":
+            name_node = node.child_by_field_name("name")
+            if name_node and name_node.text.decode() in SANITIZER_METHODS:
+                return True
+        for child in node.children:
+            if contains_sanitizer(child):
+                return True
+        return False
+
     def find_xss(node):
         if node.type == "method_invocation":
             name_node = node.child_by_field_name("name")
@@ -44,11 +72,12 @@ def detect_xss(filepath, tree, vuln_counter):
                 arguments = node.child_by_field_name("arguments")
                 if arguments:
                     args_text = arguments.text.decode()
-                    has_user_input = any(var in args_text for var in user_input_vars)
+                    used_var = next((var for var in user_input_vars if var in args_text), None)
+                    has_user_input = used_var is not None
                     has_html = any(fragment in args_text for fragment in HTML_FRAGMENTS)
                     has_concat = contains_binary_expression(arguments)
-                    if has_user_input and has_html and has_concat:
-                        used_var = next((var for var in user_input_vars if var in args_text), None)
+                    is_sanitized = contains_sanitizer(arguments) or used_var in sanitized_vars
+                    if has_user_input and has_html and has_concat and not is_sanitized:
                         vuln_counter[0] += 1
                         vulnerabilities.append(
                             {

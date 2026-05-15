@@ -4,8 +4,10 @@ import java.io.*;
 
 public class AuthController {
 
-    // 탐지 대상: 하드코딩 비밀번호
+    // 탐지 제외: 선언만 되어 있고 민감한 호출에 사용되지 않음
     private String secretKey = "my-secret-key-12345";
+
+    // 탐지 대상: DB 연결에 사용되는 하드코딩 비밀번호
     private String dbPassword = "root1234!";
 
     // 탐지 제외: 비밀번호가 아닌 일반 설정값
@@ -54,6 +56,13 @@ public class AuthController {
     public void safeInput(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String name = req.getParameter("name");
         resp.getWriter().println("Hello, user");
+    }
+
+    // 탐지 제외: HTML 이스케이프 처리 후 출력
+    public void escapedSearchResult(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String keyword = req.getParameter("q");
+        String safeKeyword = StringEscapeUtils.escapeHtml4(keyword);
+        resp.getWriter().println("<h2>검색 결과: " + safeKeyword + "</h2>");
     }
 
     // 탐지 제외: 안전한 출력 (사용자 입력 미포함)
