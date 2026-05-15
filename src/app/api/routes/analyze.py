@@ -9,6 +9,7 @@ from src.app.api.deps import get_analysis_job_store, get_analysis_service, get_c
 from src.app.api.upload import read_upload_with_limit
 from src.app.core.config import get_settings
 from src.app.schemas.analysis import AnalysisResponse
+from src.app.schemas.auth import UserResponse
 from src.app.schemas.jobs import AnalysisJobCreateResponse, AnalysisJobStatusResponse
 from src.app.schemas.repository import GitHubCloneRequest
 from src.app.services.analysis_service import (
@@ -34,12 +35,13 @@ def _run_repository_analysis_job(
     *,
     job_id: str,
     url: str,
+    user_id: int,
     service: AnalysisService,
     job_store: AnalysisJobStore,
 ) -> None:
     job_store.update(job_id, status="running")
     try:
-        response = service.analyze_github_repository(url=url)
+        response = service.analyze_github_repository(url=url, user_id=user_id)
         job_store.update(
             job_id,
             status="succeeded",
@@ -52,6 +54,7 @@ def _run_repository_analysis_job(
 @router.post("/file", response_model=AnalysisResponse)
 async def analyze_file(
     file: UploadFile | None = File(default=None),
+    current_user: UserResponse = Depends(get_current_user),
     service: AnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any] | JSONResponse:
     if file is None or not file.filename:
@@ -59,7 +62,7 @@ async def analyze_file(
 
     try:
         content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
-        return service.analyze_uploaded_file(filename=file.filename, content=content)
+        return service.analyze_uploaded_file(filename=file.filename, content=content, user_id=current_user.id)
     except UploadTooLargeError as exc:
         return JSONResponse(status_code=413, content={"error": str(exc)})
     except InvalidJavaFileError as exc:
@@ -71,6 +74,7 @@ async def analyze_file(
 @router.post("/archive", response_model=AnalysisResponse)
 async def analyze_uploaded_archive(
     file: UploadFile | None = File(default=None),
+    current_user: UserResponse = Depends(get_current_user),
     service: AnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any] | JSONResponse:
     if file is None or not file.filename:
@@ -78,7 +82,11 @@ async def analyze_uploaded_archive(
 
     try:
         content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
-        return service.analyze_uploaded_repository(filename=file.filename, content=content)
+        return service.analyze_uploaded_repository(
+            filename=file.filename,
+            content=content,
+            user_id=current_user.id,
+        )
     except UploadTooLargeError as exc:
         return JSONResponse(status_code=413, content={"error": str(exc)})
     except InvalidRepositoryArchiveError as exc:
@@ -92,10 +100,11 @@ async def analyze_uploaded_archive(
 @router.post("/repository", response_model=AnalysisResponse)
 async def analyze_github_repository(
     body: GitHubCloneRequest,
+    current_user: UserResponse = Depends(get_current_user),
     service: AnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any] | JSONResponse:
     try:
-        return service.analyze_github_repository(url=body.url)
+        return service.analyze_github_repository(url=body.url, user_id=current_user.id)
     except UploadTooLargeError as exc:
         return JSONResponse(status_code=413, content={"error": str(exc)})
     except (InvalidGitHubRepositoryError, InvalidRepositoryArchiveError) as exc:
@@ -114,6 +123,7 @@ async def analyze_github_repository(
 async def create_repository_analysis_job(
     body: GitHubCloneRequest,
     background_tasks: BackgroundTasks,
+    current_user: UserResponse = Depends(get_current_user),
     service: AnalysisService = Depends(get_analysis_service),
     job_store: AnalysisJobStore = Depends(get_analysis_job_store),
 ) -> dict[str, str]:
@@ -122,6 +132,7 @@ async def create_repository_analysis_job(
         _run_repository_analysis_job,
         job_id=job["job_id"],
         url=body.url,
+        user_id=current_user.id,
         service=service,
         job_store=job_store,
     )

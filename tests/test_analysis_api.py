@@ -76,6 +76,7 @@ def test_file_detail_endpoint_returns_404_for_missing_file(client) -> None:
 def test_existing_protected_routes_still_require_auth(unauthenticated_client) -> None:
     assert unauthenticated_client.get("/result").status_code == 401
     assert unauthenticated_client.get("/results").status_code == 401
+    assert unauthenticated_client.get("/report/some-id").status_code == 401
     assert unauthenticated_client.get("/result/some-id/files/SafeApi.java").status_code == 401
     assert unauthenticated_client.post("/analyze/repository", json={"url": "https://github.com/acme/repo"}).status_code == 401
     assert unauthenticated_client.get("/agents/profile").status_code == 401

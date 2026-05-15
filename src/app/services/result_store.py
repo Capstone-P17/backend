@@ -15,36 +15,45 @@ class AnalysisResultStore:
 
     def __init__(self) -> None:
         self._results: dict[str, dict[str, Any]] = {}
+        self._owners: dict[str, int] = {}
         self._order: list[str] = []
-        self.latest_analysis_id: str | None = None
+        self._latest_analysis_id_by_user: dict[int, str] = {}
 
-    def save(self, result: dict[str, Any]) -> str:
+    def save(self, result: dict[str, Any], user_id: int) -> str:
         analysis_id = str(uuid4())
         self._results[analysis_id] = self._clone(result)
+        self._owners[analysis_id] = user_id
         self._order.append(analysis_id)
-        self.latest_analysis_id = analysis_id
+        self._latest_analysis_id_by_user[user_id] = analysis_id
         return analysis_id
 
-    def get(self, analysis_id: str) -> dict[str, Any] | None:
+    def get(self, analysis_id: str, user_id: int) -> dict[str, Any] | None:
+        if self._owners.get(analysis_id) != user_id:
+            return None
         result = self._results.get(analysis_id)
         if result is None:
             return None
         return self._clone(result)
 
-    def get_latest(self) -> tuple[str, dict[str, Any]] | None:
-        if self.latest_analysis_id is None:
+    def get_latest(self, user_id: int) -> tuple[str, dict[str, Any]] | None:
+        latest_analysis_id = self._latest_analysis_id_by_user.get(user_id)
+        if latest_analysis_id is None:
             return None
-        latest = self.get(self.latest_analysis_id)
+        latest = self.get(latest_analysis_id, user_id)
         if latest is None:
             return None
-        return self.latest_analysis_id, latest
+        return latest_analysis_id, latest
 
-    def list_results(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_results(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = max(0, limit)
+        matching_ids = [
+            analysis_id
+            for analysis_id in self._order
+            if analysis_id in self._results and self._owners.get(analysis_id) == user_id
+        ]
         return [
             self._build_summary_item(analysis_id, self._results[analysis_id])
-            for analysis_id in reversed(self._order[-safe_limit:] if safe_limit else [])
-            if analysis_id in self._results
+            for analysis_id in reversed(matching_ids[-safe_limit:] if safe_limit else [])
         ]
 
     @classmethod
@@ -73,11 +82,12 @@ class DatabaseAnalysisResultStore:
     def __init__(self, session_factory: Callable[[], Session]) -> None:
         self._session_factory = session_factory
 
-    def save(self, result: dict[str, Any]) -> str:
+    def save(self, result: dict[str, Any], user_id: int) -> str:
         analysis_id = str(uuid4())
         analysis = result.get("analysis_result", {})
         summary = analysis.get("summary", {}) if isinstance(analysis, dict) else {}
         record = AnalysisResultModel(
+            user_id=user_id,
             analysis_id=analysis_id,
             repository=analysis.get("repository") or None if isinstance(analysis, dict) else None,
             target_path=analysis.get("target_path") if isinstance(analysis, dict) else None,
@@ -91,37 +101,46 @@ class DatabaseAnalysisResultStore:
             session.commit()
         return analysis_id
 
-    def get(self, analysis_id: str) -> dict[str, Any] | None:
+    def get(self, analysis_id: str, user_id: int) -> dict[str, Any] | None:
         with self._session_factory() as session:
             record = session.scalar(
-                select(AnalysisResultModel).where(AnalysisResultModel.analysis_id == analysis_id)
+                select(AnalysisResultModel).where(
+                    AnalysisResultModel.analysis_id == analysis_id,
+                    AnalysisResultModel.user_id == user_id,
+                )
             )
             if record is None:
                 return None
             return deepcopy(record.result_json)
 
-    def get_latest(self) -> tuple[str, dict[str, Any]] | None:
+    def get_latest(self, user_id: int) -> tuple[str, dict[str, Any]] | None:
         with self._session_factory() as session:
             record = session.scalar(
-                select(AnalysisResultModel).order_by(
+                select(AnalysisResultModel)
+                .where(AnalysisResultModel.user_id == user_id)
+                .order_by(
                     desc(AnalysisResultModel.created_at),
                     desc(AnalysisResultModel.id),
-                ).limit(1)
+                )
+                .limit(1)
             )
             if record is None:
                 return None
             return record.analysis_id, deepcopy(record.result_json)
 
-    def list_results(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_results(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = max(0, limit)
         if safe_limit == 0:
             return []
         with self._session_factory() as session:
             records = session.scalars(
-                select(AnalysisResultModel).order_by(
+                select(AnalysisResultModel)
+                .where(AnalysisResultModel.user_id == user_id)
+                .order_by(
                     desc(AnalysisResultModel.created_at),
                     desc(AnalysisResultModel.id),
-                ).limit(safe_limit)
+                )
+                .limit(safe_limit)
             ).all()
             return [self._build_summary_item(record) for record in records]
 

@@ -28,8 +28,8 @@ class ReportService:
         self.analysis_service = analysis_service
         self._register_fonts()
 
-    def build_pdf(self, analysis_id: str) -> tuple[str, bytes]:
-        response = self.analysis_service.get_result(analysis_id)
+    def build_pdf(self, analysis_id: str, user_id: int) -> tuple[str, bytes]:
+        response = self.analysis_service.get_result(analysis_id, user_id)
         analysis = response.get("analysis_result", {})
         if not isinstance(analysis, dict):
             raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")

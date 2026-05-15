@@ -31,21 +31,28 @@ def sample_result(repository: str = "repo", total: int = 1) -> dict:
 
 
 def assert_store_contract(store) -> None:
-    assert store.get_latest() is None
-    first_id = store.save(sample_result("first", 1))
-    second_id = store.save(sample_result("second", 2))
+    assert store.get_latest(user_id=1) is None
+    first_id = store.save(sample_result("first", 1), user_id=1)
+    second_id = store.save(sample_result("second", 2), user_id=1)
+    third_id = store.save(sample_result("other", 4), user_id=2)
     UUID(first_id)
     UUID(second_id)
+    UUID(third_id)
     assert first_id != second_id
-    assert store.get(first_id)["analysis_result"]["repository"] == "first"
-    latest_id, latest = store.get_latest()
+    assert store.get(first_id, user_id=1)["analysis_result"]["repository"] == "first"
+    assert store.get(first_id, user_id=2) is None
+    latest_id, latest = store.get_latest(user_id=1)
     assert latest_id == second_id
     assert latest["analysis_result"]["repository"] == "second"
-    summaries = store.list_results(limit=1)
+    latest_other_id, latest_other = store.get_latest(user_id=2)
+    assert latest_other_id == third_id
+    assert latest_other["analysis_result"]["repository"] == "other"
+    summaries = store.list_results(user_id=1, limit=1)
     assert len(summaries) == 1
     assert summaries[0]["analysis_id"] == second_id
     assert summaries[0]["total_vulnerabilities"] == 2
-    assert store.get("missing") is None
+    assert store.list_results(user_id=2)[0]["analysis_id"] == third_id
+    assert store.get("missing", user_id=1) is None
 
 
 def test_in_memory_result_store_contract() -> None:
@@ -57,10 +64,11 @@ def test_database_result_store_persists_across_instances(tmp_path) -> None:
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     store = DatabaseAnalysisResultStore(SessionLocal)
-    analysis_id = store.save(sample_result("persisted", 3))
+    analysis_id = store.save(sample_result("persisted", 3), user_id=7)
 
     new_store = DatabaseAnalysisResultStore(SessionLocal)
-    assert new_store.get(analysis_id)["analysis_result"]["repository"] == "persisted"
-    latest_id, _ = new_store.get_latest()
+    assert new_store.get(analysis_id, user_id=7)["analysis_result"]["repository"] == "persisted"
+    assert new_store.get(analysis_id, user_id=1) is None
+    latest_id, _ = new_store.get_latest(user_id=7)
     assert latest_id == analysis_id
-    assert new_store.list_results()[0]["analysis_id"] == analysis_id
+    assert new_store.list_results(user_id=7)[0]["analysis_id"] == analysis_id
