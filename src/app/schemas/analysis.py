@@ -20,6 +20,9 @@ class VulnerabilityFinding(BaseModel):
     type: str
     severity: Severity
     cwe: str
+    guide_source: str
+    guide_category: str
+    guide_item: str
     cvss: CvssInfo | None = None
     file: str
     line: int | None = None
@@ -40,6 +43,7 @@ class SecurityScore(BaseModel):
 class AnalysisSummary(BaseModel):
     total_vulnerabilities: int
     by_type: dict[str, int] = Field(default_factory=dict)
+    by_guide_category: dict[str, int] = Field(default_factory=dict)
     by_severity: dict[str, int] = Field(default_factory=dict)
     score: SecurityScore
 
@@ -68,6 +72,7 @@ class AnalysisResponse(BaseModel):
 class FileAnalysisSummary(BaseModel):
     total_vulnerabilities: int
     by_type: dict[str, int] = Field(default_factory=dict)
+    by_guide_category: dict[str, int] = Field(default_factory=dict)
     by_severity: dict[str, int] = Field(default_factory=dict)
     score: int | None = None
 

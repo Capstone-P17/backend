@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, Response
 
 from src.app.api.deps import get_current_user, get_report_service
 from src.app.schemas.auth import UserResponse
 from src.app.services.analysis_service import AnalysisResultNotFoundError
-from src.app.services.report_service import ReportService
+
+if TYPE_CHECKING:
+    from src.app.services.report_service import ReportService
 
 router = APIRouter(
     prefix="/report",

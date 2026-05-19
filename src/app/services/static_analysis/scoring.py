@@ -14,6 +14,27 @@ SEVERITY_PENALTY = {
     "LOW": 2,
 }
 
+GUIDE_CATEGORIES = (
+    "입력데이터 검증 및 표현",
+    "보안기능",
+    "시간 및 상태",
+    "에러처리",
+    "코드오류",
+    "캡슐화",
+    "API 오용",
+)
+
+
+def count_by_guide_category(vulnerabilities):
+    counts = {category: 0 for category in GUIDE_CATEGORIES}
+    for vulnerability in vulnerabilities:
+        category = vulnerability.get("guide_category")
+        if not category:
+            continue
+        counts.setdefault(str(category), 0)
+        counts[str(category)] += 1
+    return counts
+
 
 def calculate_scores(vulnerabilities, files):
     file_vulnerabilities = {file_path: [v for v in vulnerabilities if v["file"] == file_path] for file_path in files}
@@ -47,5 +68,6 @@ def build_summary(vulnerabilities, files):
             "INSECURE_RANDOM": sum(1 for vulnerability in vulnerabilities if vulnerability["type"] == "INSECURE_RANDOM"),
             "WEAK_HASH": sum(1 for vulnerability in vulnerabilities if vulnerability["type"] == "WEAK_HASH"),
         },
+        "by_guide_category": count_by_guide_category(vulnerabilities),
         "score": calculate_scores(vulnerabilities, files),
     }

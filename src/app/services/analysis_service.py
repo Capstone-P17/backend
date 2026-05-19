@@ -7,14 +7,17 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 import httpx
 
 from src.app.core.config import Settings
-from src.app.services.analyzer_service import AnalyzerService
-from src.app.services.llm_report_service import SecurityReportGenerator
 from src.app.services.result_store import AnalysisResultStore
+
+if TYPE_CHECKING:
+    from src.app.services.analyzer_service import AnalyzerService
+    from src.app.services.llm_report_service import SecurityReportGenerator
 
 _GITHUB_REPO_URL_RE = re.compile(
     r"^https://github\.com/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+?)(?:\.git)?$"
@@ -76,7 +79,11 @@ class AnalysisService:
         self.settings = settings
         self.analyzer_service = analyzer_service
         self.result_store = result_store
-        self.report_generator = report_generator or SecurityReportGenerator(settings)
+        if report_generator is None:
+            from src.app.services.llm_report_service import SecurityReportGenerator
+
+            report_generator = SecurityReportGenerator(settings)
+        self.report_generator = report_generator
 
     def analyze_uploaded_file(self, filename: str, content: bytes, user_id: int) -> dict[str, object]:
         try:

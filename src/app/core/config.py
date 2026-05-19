@@ -1,10 +1,10 @@
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ENV_FILE = PROJECT_ROOT / ".env"
@@ -18,14 +18,12 @@ DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_MAX_ARCHIVE_MEMBERS = 5000
 
 
-class Settings(BaseSettings):
+class Settings(BaseModel):
     """Application settings loaded from code configuration and environment variables."""
 
-    model_config = SettingsConfigDict(
-        env_file=ENV_FILE,
-        env_file_encoding="utf-8",
+    model_config = ConfigDict(
         extra="ignore",
-        case_sensitive=False,
+        populate_by_name=True,
     )
 
     app_name: str = Field(
@@ -234,4 +232,47 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    return Settings.model_validate(_load_settings_values())
+
+
+def _load_settings_values() -> dict[str, str]:
+    raw_values = _read_env_file(ENV_FILE)
+    raw_values.update({key.upper(): value for key, value in os.environ.items()})
+
+    values: dict[str, str] = {}
+    for field_name, field_info in Settings.model_fields.items():
+        for env_name in _field_env_names(field_name, field_info.validation_alias):
+            if env_name in raw_values:
+                values[field_name] = raw_values[env_name]
+                break
+    return values
+
+
+def _field_env_names(field_name: str, validation_alias: Any) -> list[str]:
+    if validation_alias is None:
+        return [field_name.upper()]
+
+    choices = getattr(validation_alias, "choices", None)
+    if choices is not None:
+        return [str(choice).upper() for choice in choices]
+
+    return [str(validation_alias).upper()]
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+
+        key, value = stripped.split("=", 1)
+        key = key.strip().upper()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values

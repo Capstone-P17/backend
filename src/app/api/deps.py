@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import jwt
 from fastapi import Depends, HTTPException, Request, status
@@ -9,13 +12,15 @@ from src.app.core.security import decode_access_token
 from src.app.core.config import get_settings
 from src.app.db.session import SessionLocal, get_db_session
 from src.app.schemas.auth import UserResponse
-from src.app.services.agent_service import AgentService
-from src.app.services.analysis_service import AnalysisService
-from src.app.services.analyzer_service import AnalyzerService
 from src.app.services.auth_service import AuthService
 from src.app.services.job_store import AnalysisJobStore
-from src.app.services.report_service import ReportService
-from src.app.services.result_store import AnalysisResultStore, DatabaseAnalysisResultStore
+from src.app.services.result_store import DatabaseAnalysisResultStore
+
+if TYPE_CHECKING:
+    from src.app.services.agent_service import AgentService
+    from src.app.services.analysis_service import AnalysisService
+    from src.app.services.analyzer_service import AnalyzerService
+    from src.app.services.report_service import ReportService
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -23,6 +28,8 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 @lru_cache
 def get_agent_service() -> AgentService:
+    from src.app.services.agent_service import AgentService
+
     return AgentService(
         settings=get_settings(),
         analysis_service=get_analysis_service(),
@@ -41,11 +48,15 @@ def get_analysis_job_store() -> AnalysisJobStore:
 
 @lru_cache
 def get_analyzer_service() -> AnalyzerService:
+    from src.app.services.analyzer_service import AnalyzerService
+
     return AnalyzerService(workspace_root=get_settings().workspace_root)
 
 
 @lru_cache
 def get_analysis_service() -> AnalysisService:
+    from src.app.services.analysis_service import AnalysisService
+
     return AnalysisService(
         settings=get_settings(),
         analyzer_service=get_analyzer_service(),
@@ -56,6 +67,8 @@ def get_analysis_service() -> AnalysisService:
 def get_report_service(
     analysis_service: AnalysisService = Depends(get_analysis_service),
 ) -> ReportService:
+    from src.app.services.report_service import ReportService
+
     return ReportService(
         settings=get_settings(),
         analysis_service=analysis_service,

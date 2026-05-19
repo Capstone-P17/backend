@@ -3,9 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
-
 from src.app.core.config import Settings
 
 
@@ -28,6 +25,8 @@ class SecurityReportGenerator:
         instructions: str = "",
     ) -> str:
         llm = self._create_llm()
+        from langchain_core.prompts import ChatPromptTemplate
+
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
@@ -69,9 +68,11 @@ class SecurityReportGenerator:
         )
         return self._coerce_content(response.content)
 
-    def _create_llm(self) -> ChatOpenAI:
+    def _create_llm(self) -> Any:
         if not self.settings.openai_api_key:
             raise RuntimeError("LLM 리포트 생성을 위한 OPENAI_API_KEY가 설정되어 있지 않습니다.")
+
+        from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
             api_key=self.settings.openai_api_key,

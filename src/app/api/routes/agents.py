@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
@@ -9,7 +10,6 @@ from src.app.api.upload import read_upload_with_limit
 from src.app.core.config import get_settings
 from src.app.schemas.agent import AgentProfileResponse, AgentRunRequest, AgentRunResponse
 from src.app.schemas.repository import GitHubRunRequest
-from src.app.services.agent_service import AgentService
 from src.app.services.analysis_service import (
     AnalysisExecutionError,
     GitHubRepositoryCloneError,
@@ -19,6 +19,9 @@ from src.app.services.analysis_service import (
     RepositoryArchiveExtractionError,
     UploadTooLargeError,
 )
+
+if TYPE_CHECKING:
+    from src.app.services.agent_service import AgentService
 
 router = APIRouter(
     prefix="/agents",
