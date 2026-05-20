@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -22,7 +24,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
     result = AnalyzerService(PROJECT_ROOT).analyze("src/analyzer/test_samples")
     analysis = result["analysis_result"]
     assert analysis["files_analyzed"] == 7
-    assert analysis["summary"]["total_vulnerabilities"] == 23
+    assert analysis["summary"]["total_vulnerabilities"] == 21
     assert {finding["type"] for finding in analysis["vulnerabilities"]} == EXPECTED_TYPES
     for finding in analysis["vulnerabilities"]:
         assert finding["description"]
@@ -70,3 +72,146 @@ def test_vulnerability_schema_requires_enriched_fields() -> None:
         payload.pop(required_field)
         with pytest.raises(ValidationError):
             VulnerabilityFinding.model_validate(payload)
+
+
+def test_xss_detector_tracks_sanitized_output_flow(tmp_path: Path) -> None:
+    sample = tmp_path / "XssFlowController.java"
+    sample.write_text(
+        """
+import javax.servlet.http.*;
+import java.io.*;
+
+public class XssFlowController {
+    public void unsafe(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String keyword = req.getParameter("q");
+        String decorated = keyword;
+        resp.getWriter().println("<h2>" + decorated + "</h2>");
+    }
+
+    public void safeByApacheEscape(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String keyword = req.getParameter("q");
+        String safeKeyword = StringEscapeUtils.escapeHtml4(keyword);
+        resp.getWriter().println("<h2>" + safeKeyword + "</h2>");
+    }
+
+    public void safeByOwaspEncoder(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String keyword = req.getParameter("q");
+        String safeKeyword = Encode.forHtml(keyword);
+        resp.getWriter().println("<h2>" + safeKeyword + "</h2>");
+    }
+
+    public void safeBySpringHtmlUtils(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String keyword = req.getParameter("q");
+        keyword = HtmlUtils.htmlEscape(keyword);
+        resp.getWriter().println("<h2>" + keyword + "</h2>");
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = result["analysis_result"]["vulnerabilities"]
+
+    assert [finding["type"] for finding in findings] == ["XSS"]
+    assert findings[0]["function"] == "unsafe"
+    assert "decorated" in findings[0]["code_snippet"]
+
+
+def test_hardcoded_secret_requires_sensitive_usage_flow(tmp_path: Path) -> None:
+    sample = tmp_path / "SecretFlowController.java"
+    sample.write_text(
+        """
+import java.sql.*;
+
+public class SecretFlowController {
+    private String unusedPassword = "not-used-1234";
+    private String returnedToken = "return-only-token";
+    private String copiedSecret = "copied-secret";
+    private String dbPassword = "root1234!";
+
+    public String returnToken() {
+        return returnedToken;
+    }
+
+    public void copyOnly() {
+        String localSecret = copiedSecret;
+    }
+
+    public Connection connect() throws Exception {
+        return DriverManager.getConnection("jdbc:mysql://localhost/db", "root", dbPassword);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "HARDCODED_SECRET"
+    ]
+
+    assert len(findings) == 1
+    assert findings[0]["code_snippet"] == 'private String dbPassword = "root1234!";'
+    assert findings[0]["call_chain"] == [
+        "SecretFlowController.connect",
+        "getConnection",
+        "선언 line 7",
+        "사용 line 17",
+    ]
+
+
+def test_sql_injection_requires_tainted_sql_execution_flow(tmp_path: Path) -> None:
+    sample = tmp_path / "SqlFlowController.java"
+    sample.write_text(
+        """
+import java.sql.*;
+import javax.servlet.http.*;
+
+public class SqlFlowController {
+    public ResultSet unsafeConcat(String userId, Statement stmt) throws Exception {
+        String query = "SELECT * FROM users WHERE id = '" + userId + "'";
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet unsafeFormat(String username, Statement stmt) throws Exception {
+        String query = String.format("SELECT * FROM users WHERE username = '%s'", username);
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet unsafeConcatMethod(HttpServletRequest req, Statement stmt) throws Exception {
+        String userId = req.getParameter("id");
+        String query = "SELECT * FROM users WHERE id = '".concat(userId).concat("'");
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet safePrepared(String userId, Connection conn) throws Exception {
+        PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+        ps.setString(1, userId);
+        return ps.executeQuery();
+    }
+
+    public ResultSet safeConstantConcat(Statement stmt) throws Exception {
+        String query = "SELECT * " + "FROM users";
+        return stmt.executeQuery(query);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    assert [finding["function"] for finding in findings] == [
+        "unsafeConcat",
+        "unsafeFormat",
+        "unsafeConcatMethod",
+    ]
+    assert all("executeQuery" in finding["call_chain"][-1] for finding in findings)

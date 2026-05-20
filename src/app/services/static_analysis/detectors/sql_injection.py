@@ -9,7 +9,11 @@ from src.app.services.static_analysis.parser import (
 )
 
 SQL_EXEC_METHODS = ["executeQuery", "executeUpdate", "execute"]
+SQL_PREPARE_METHODS = ["prepareStatement"]
+SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS
 SQL_KEYWORDS = ["SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE"]
+INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
+SQL_BUILDER_METHODS = ["format", "formatted", "concat"]
 
 # 인증 우회 가능성 → CRITICAL
 AUTH_KEYWORDS = ["USERNAME", "PASSWORD", "PASSWD", "LOGIN", "AUTH"]
@@ -29,105 +33,168 @@ def _determine_severity(code_text: str) -> str:
 
 def detect_sql_injection(filepath, tree, vuln_counter):
     vulnerabilities = []
-    tainted_vars = {}
 
-    def collect_tainted_vars(node):
-        if node.type in ("local_variable_declaration", "field_declaration"):
-            for child in node.children:
-                if child.type == "variable_declarator":
-                    name_node = child.child_by_field_name("name")
-                    value_node = child.child_by_field_name("value")
-                    if name_node and value_node and has_string_concat_with_sql(value_node):
-                        key = f"{name_node.text.decode()}_{name_node.start_point[0]}"
-                        tainted_vars[key] = {
-                            "var_name": name_node.text.decode(),
-                            "line": name_node.start_point[0] + 1,
-                            "code": node.text.decode().strip(),
-                            "method": find_parent_method(node),
-                        }
+    def text(node):
+        return node.text.decode()
+
+    def iter_methods(node):
+        if node.type == "method_declaration":
+            yield node
+            return
         for child in node.children:
-            collect_tainted_vars(child)
+            yield from iter_methods(child)
 
-    def has_string_concat_with_sql(node):
-        if node.type == "binary_expression":
-            text = node.text.decode()
-            has_plus = "+" in text
-            has_sql = any(keyword in text.upper() for keyword in SQL_KEYWORDS)
-            has_identifier = any(child.type == "identifier" for child in iterate_all(node))
-            return has_plus and has_sql and has_identifier
-        return False
+    def identifiers(node):
+        return {text(child) for child in iterate_all(node) if child.type == "identifier"}
 
-    def find_sqli(node):
+    def method_name(node):
+        if node.type != "method_invocation":
+            return None
+        name_node = node.child_by_field_name("name")
+        return text(name_node) if name_node else None
+
+    def contains_sql_keyword(node):
+        return any(keyword in text(node).upper() for keyword in SQL_KEYWORDS)
+
+    def contains_input_method(node):
         if node.type == "method_invocation":
             name_node = node.child_by_field_name("name")
-            if name_node and name_node.text.decode() in SQL_EXEC_METHODS:
-                arguments = node.child_by_field_name("arguments")
-                if arguments:
-                    for arg in arguments.children:
-                        if arg.type == "identifier":
-                            arg_name = arg.text.decode()
-                            current_method = find_parent_method(node)
-                            matched = [
-                                key
-                                for key, value in tainted_vars.items()
-                                if value["var_name"] == arg_name and value["method"] == current_method
-                            ]
-                            if matched:
-                                closest = min(
-                                    matched,
-                                    key=lambda key: abs(
-                                        tainted_vars[key]["line"] - (arg.start_point[0] + 1)
-                                    ),
-                                )
-                                var = tainted_vars[closest]
-                                severity = _determine_severity(var["code"])
-                                vuln_counter[0] += 1
-                                vulnerabilities.append(
-                                    {
-                                        "id": f"VULN-{vuln_counter[0]:03d}",
-                                        "type": "SQL_INJECTION",
-                                        "severity": severity,
-                                        "cvss": get_cvss("SQL_INJECTION", severity),
-                                        "file": filepath,
-                                        "line": var["line"],
-                                        "function": current_method,
-                                        "code_snippet": var["code"],
-                                        "call_chain": build_call_chain(node),
-                                        "description": "",
-                                    }
-                                )
-                        if arg.type == "binary_expression" and has_string_concat_with_sql(arg):
-                            severity = _determine_severity(node.text.decode())
-                            vuln_counter[0] += 1
-                            vulnerabilities.append(
-                                {
-                                    "id": f"VULN-{vuln_counter[0]:03d}",
-                                    "type": "SQL_INJECTION",
-                                    "severity": severity,
-                                    "cvss": get_cvss("SQL_INJECTION", severity),
-                                    "file": filepath,
-                                    "line": node.start_point[0] + 1,
-                                    "function": find_parent_method(node),
-                                    "code_snippet": node.text.decode().strip(),
-                                    "call_chain": build_call_chain(node),
-                                    "description": "",
-                                }
-                            )
-        for child in node.children:
-            find_sqli(child)
+            if name_node and text(name_node) in INPUT_METHODS:
+                return True
+        return any(contains_input_method(child) for child in node.children)
 
-    def build_call_chain(node):
+    def contains_sql_builder(node):
+        if node.type == "binary_expression" and "+" in text(node):
+            return True
+        if node.type == "method_invocation":
+            name = method_name(node)
+            if name in SQL_BUILDER_METHODS:
+                return True
+        return any(contains_sql_builder(child) for child in node.children)
+
+    def collect_parameter_names(method_node):
+        params = set()
+        for node in iterate_all(method_node):
+            if node.type == "formal_parameter":
+                name_node = node.child_by_field_name("name")
+                if name_node:
+                    params.add(text(name_node))
+        return params
+
+    def analyze_method(method_node):
+        tainted_vars = set(collect_parameter_names(method_node))
+        sql_vars = {}
+
+        def expression_has_taint(node):
+            refs = identifiers(node)
+            return contains_input_method(node) or bool(refs & tainted_vars)
+
+        def is_unsafe_sql_expression(node):
+            return contains_sql_keyword(node) and contains_sql_builder(node) and expression_has_taint(node)
+
+        def update_variable(var_name, value_node, statement_node):
+            if is_unsafe_sql_expression(value_node):
+                sql_vars[var_name] = {
+                    "line": statement_node.start_point[0] + 1,
+                    "code": statement_node.text.decode().strip(),
+                }
+                tainted_vars.add(var_name)
+                return
+
+            if expression_has_taint(value_node):
+                tainted_vars.add(var_name)
+            else:
+                tainted_vars.discard(var_name)
+
+            sql_vars.pop(var_name, None)
+
+        def visit(node):
+            if node.type == "method_declaration" and node is not method_node:
+                return
+
+            if node.type in ("local_variable_declaration", "field_declaration"):
+                for child in node.children:
+                    if child.type == "variable_declarator":
+                        name_node = child.child_by_field_name("name")
+                        value_node = child.child_by_field_name("value")
+                        if name_node and value_node:
+                            update_variable(text(name_node), value_node, node)
+
+            if node.type == "assignment_expression":
+                left = node.child_by_field_name("left")
+                right = node.child_by_field_name("right")
+                if left and right and left.type == "identifier":
+                    update_variable(text(left), right, node)
+
+            if node.type == "method_invocation":
+                inspect_sql_sink(node)
+
+            for child in node.children:
+                visit(child)
+
+        def inspect_sql_sink(node):
+            name = method_name(node)
+            if name not in SQL_SINK_METHODS:
+                return
+
+            arguments = node.child_by_field_name("arguments")
+            if not arguments:
+                return
+
+            argument_vars = identifiers(arguments)
+            matched_sql_var = next((var_name for var_name in argument_vars if var_name in sql_vars), None)
+            if matched_sql_var:
+                var = sql_vars[matched_sql_var]
+                add_finding(
+                    node=node,
+                    line=var["line"],
+                    code=var["code"],
+                    call_chain=build_call_chain(node, matched_sql_var),
+                )
+                return
+
+            if is_unsafe_sql_expression(arguments):
+                add_finding(
+                    node=node,
+                    line=node.start_point[0] + 1,
+                    code=node.text.decode().strip(),
+                    call_chain=build_call_chain(node),
+                )
+
+        def add_finding(node, line, code, call_chain):
+            severity = _determine_severity(code)
+            vuln_counter[0] += 1
+            vulnerabilities.append(
+                {
+                    "id": f"VULN-{vuln_counter[0]:03d}",
+                    "type": "SQL_INJECTION",
+                    "severity": severity,
+                    "cvss": get_cvss("SQL_INJECTION", severity),
+                    "file": filepath,
+                    "line": line,
+                    "function": find_parent_method(node),
+                    "code_snippet": code,
+                    "call_chain": call_chain,
+                    "description": "",
+                }
+            )
+
+        visit(method_node)
+
+    def build_call_chain(node, sql_var=None):
         chain = []
         class_name = find_parent_class(node)
         method_name = find_parent_method(node)
         if class_name and method_name:
             chain.append(f"{class_name}.{method_name}")
+        if sql_var:
+            chain.append(sql_var)
         name_node = node.child_by_field_name("name")
         object_node = node.child_by_field_name("object")
         if object_node and name_node:
             chain.append(f"{object_node.text.decode()}.{name_node.text.decode()}")
         return chain
 
-    collect_tainted_vars(tree.root_node)
-    find_sqli(tree.root_node)
+    for method_node in iter_methods(tree.root_node):
+        analyze_method(method_node)
     return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]

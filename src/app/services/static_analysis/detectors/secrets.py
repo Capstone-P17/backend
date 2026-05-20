@@ -18,40 +18,52 @@ SECRET_USAGE_METHODS = {
     "setApiKey",
     "setSecret",
 }
+SECRET_USAGE_CLASS_NAMES = {
+    "PasswordAuthentication",
+    "UsernamePasswordAuthenticationToken",
+}
 
 
 def _text(node):
     return node.text.decode()
 
 
-def _nearest_usage_context(node):
+def _nearest_sensitive_call(node):
     current = node.parent
     while current:
-        if current.type in {
-            "method_invocation",
-            "object_creation_expression",
-            "assignment_expression",
-            "return_statement",
-        }:
+        if current.type == "method_declaration":
+            return None
+        if current.type == "method_invocation":
+            return current
+        if current.type == "object_creation_expression":
             return current
         current = current.parent
     return None
 
 
 def _usage_method_name(node):
-    context = _nearest_usage_context(node)
+    context = _nearest_sensitive_call(node)
     if not context or context.type != "method_invocation":
         return None
     name_node = context.child_by_field_name("name")
     return _text(name_node) if name_node else None
 
 
+def _object_creation_class_name(node):
+    context = _nearest_sensitive_call(node)
+    if not context or context.type != "object_creation_expression":
+        return None
+    type_node = context.child_by_field_name("type")
+    return _text(type_node).split(".")[-1] if type_node else None
+
+
 def _is_relevant_secret_usage(node):
     method_name = _usage_method_name(node)
     if method_name and method_name in SECRET_USAGE_METHODS:
         return True
-    context = _nearest_usage_context(node)
-    return context is not None and context.type in {"object_creation_expression", "assignment_expression", "return_statement"}
+
+    class_name = _object_creation_class_name(node)
+    return class_name in SECRET_USAGE_CLASS_NAMES
 
 
 def _build_secret_chain(declaration_node, usage_node):
@@ -67,9 +79,9 @@ def _build_secret_chain(declaration_node, usage_node):
     if usage_method:
         chain.append(usage_method)
     else:
-        context = _nearest_usage_context(usage_node)
-        if context:
-            chain.append(context.type)
+        class_name = _object_creation_class_name(usage_node)
+        if class_name:
+            chain.append(class_name)
 
     chain.append(f"선언 line {declaration_node.start_point[0] + 1}")
     chain.append(f"사용 line {usage_node.start_point[0] + 1}")

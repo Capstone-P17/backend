@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.detectors.cvss import get_cvss
-from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
+from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 
 INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
 OUTPUT_METHODS = ["println", "print", "write", "append"]
@@ -12,6 +12,12 @@ SANITIZER_METHODS = [
     "escapeHtml4",
     "escapeHtml3",
     "htmlEscape",
+    "htmlEscapeDecimal",
+    "htmlEscapeHex",
+    "encodeForHTML",
+    "encodeForHtml",
+    "encodeForHTMLAttribute",
+    "encodeForHtmlAttribute",
     "forHtml",
     "forHtmlContent",
     "forHtmlAttribute",
@@ -22,33 +28,21 @@ SANITIZER_METHODS = [
 
 def detect_xss(filepath, tree, vuln_counter):
     vulnerabilities = []
-    user_input_vars = {}
-    sanitized_vars = set()
 
-    def collect_user_inputs(node):
-        if node.type in ("local_variable_declaration", "field_declaration"):
-            for child in node.children:
-                if child.type == "variable_declarator":
-                    name_node = child.child_by_field_name("name")
-                    value_node = child.child_by_field_name("value")
-                    if name_node and value_node and contains_input_method(value_node):
-                        user_input_vars[name_node.text.decode()] = {
-                            "line": name_node.start_point[0] + 1,
-                            "code": node.text.decode().strip(),
-                        }
-                    if name_node and value_node and contains_sanitizer(value_node):
-                        sanitized_vars.add(name_node.text.decode())
-        if node.type == "assignment_expression" and contains_sanitizer(node):
-            left = node.child_by_field_name("left")
-            if left:
-                sanitized_vars.add(left.text.decode())
+    def text(node):
+        return node.text.decode()
+
+    def iter_methods(node):
+        if node.type == "method_declaration":
+            yield node
+            return
         for child in node.children:
-            collect_user_inputs(child)
+            yield from iter_methods(child)
 
     def contains_input_method(node):
         if node.type == "method_invocation":
             name_node = node.child_by_field_name("name")
-            if name_node and name_node.text.decode() in INPUT_METHODS:
+            if name_node and text(name_node) in INPUT_METHODS:
                 return True
         for child in node.children:
             if contains_input_method(child):
@@ -58,43 +52,122 @@ def detect_xss(filepath, tree, vuln_counter):
     def contains_sanitizer(node):
         if node.type == "method_invocation":
             name_node = node.child_by_field_name("name")
-            if name_node and name_node.text.decode() in SANITIZER_METHODS:
+            if name_node and text(name_node) in SANITIZER_METHODS:
                 return True
         for child in node.children:
             if contains_sanitizer(child):
                 return True
         return False
 
-    def find_xss(node):
-        if node.type == "method_invocation":
+    def identifiers(node):
+        return {text(child) for child in iterate_all(node) if child.type == "identifier"}
+
+    def analyze_method(method_node):
+        user_input_vars = {}
+        tainted_vars = set()
+        sanitized_vars = set()
+
+        def remember_taint(var_name, source_node, source_var=None):
+            tainted_vars.add(var_name)
+            sanitized_vars.discard(var_name)
+            source = user_input_vars.get(source_var) if source_var else None
+            user_input_vars[var_name] = source or {
+                "line": source_node.start_point[0] + 1,
+                "code": source_node.text.decode().strip(),
+            }
+
+        def remember_sanitized(var_name):
+            sanitized_vars.add(var_name)
+            tainted_vars.discard(var_name)
+
+        def clear_tracking(var_name):
+            tainted_vars.discard(var_name)
+            sanitized_vars.discard(var_name)
+            user_input_vars.pop(var_name, None)
+
+        def update_variable(var_name, value_node, statement_node):
+            refs = identifiers(value_node)
+            source_var = next((name for name in refs if name in tainted_vars), None)
+            sanitized_source_var = next((name for name in refs if name in sanitized_vars), None)
+
+            if contains_sanitizer(value_node):
+                remember_sanitized(var_name)
+            elif contains_input_method(value_node):
+                remember_taint(var_name, statement_node)
+            elif source_var:
+                remember_taint(var_name, statement_node, source_var)
+            elif sanitized_source_var:
+                remember_sanitized(var_name)
+            else:
+                clear_tracking(var_name)
+
+        def visit(node):
+            if node.type == "method_declaration" and node is not method_node:
+                return
+
+            if node.type in ("local_variable_declaration", "field_declaration"):
+                for child in node.children:
+                    if child.type == "variable_declarator":
+                        name_node = child.child_by_field_name("name")
+                        value_node = child.child_by_field_name("value")
+                        if name_node and value_node:
+                            update_variable(text(name_node), value_node, node)
+                return
+
+            if node.type == "assignment_expression":
+                left = node.child_by_field_name("left")
+                right = node.child_by_field_name("right")
+                if left and right and left.type == "identifier":
+                    update_variable(text(left), right, node)
+                return
+
+            if node.type == "method_invocation":
+                inspect_output(node)
+
+            for child in node.children:
+                visit(child)
+
+        def inspect_output(node):
             name_node = node.child_by_field_name("name")
-            if name_node and name_node.text.decode() in OUTPUT_METHODS:
-                arguments = node.child_by_field_name("arguments")
-                if arguments:
-                    args_text = arguments.text.decode()
-                    used_var = next((var for var in user_input_vars if var in args_text), None)
-                    has_user_input = used_var is not None
-                    has_html = any(fragment in args_text for fragment in HTML_FRAGMENTS)
-                    has_concat = contains_binary_expression(arguments)
-                    is_sanitized = contains_sanitizer(arguments) or used_var in sanitized_vars
-                    if has_user_input and has_html and has_concat and not is_sanitized:
-                        vuln_counter[0] += 1
-                        vulnerabilities.append(
-                            {
-                                "id": f"VULN-{vuln_counter[0]:03d}",
-                                "type": "XSS",
-                                "severity": "HIGH",
-                                "cvss": get_cvss("XSS", "HIGH"),
-                                "file": filepath,
-                                "line": node.start_point[0] + 1,
-                                "function": find_parent_method(node),
-                                "code_snippet": node.text.decode().strip(),
-                                "call_chain": build_xss_chain(node, used_var),
-                                "description": "",
-                            }
-                        )
-        for child in node.children:
-            find_xss(child)
+            if not name_node or text(name_node) not in OUTPUT_METHODS:
+                return
+
+            arguments = node.child_by_field_name("arguments")
+            if not arguments:
+                return
+
+            args_text = arguments.text.decode()
+            argument_identifiers = identifiers(arguments)
+            unsafe_vars = [
+                var_name
+                for var_name in tainted_vars
+                if var_name in argument_identifiers and var_name not in sanitized_vars
+            ]
+            direct_input = contains_input_method(arguments)
+            has_user_input = bool(unsafe_vars) or direct_input
+            has_html = any(fragment in args_text for fragment in HTML_FRAGMENTS)
+            has_concat = contains_binary_expression(arguments)
+            is_sanitized = contains_sanitizer(arguments)
+
+            if has_user_input and has_html and has_concat and not is_sanitized:
+                used_var = unsafe_vars[0] if unsafe_vars else None
+                vuln_counter[0] += 1
+                vulnerabilities.append(
+                    {
+                        "id": f"VULN-{vuln_counter[0]:03d}",
+                        "type": "XSS",
+                        "severity": "HIGH",
+                        "cvss": get_cvss("XSS", "HIGH"),
+                        "file": filepath,
+                        "line": node.start_point[0] + 1,
+                        "function": find_parent_method(node),
+                        "code_snippet": node.text.decode().strip(),
+                        "call_chain": build_xss_chain(node, used_var, user_input_vars),
+                        "description": "",
+                    }
+                )
+
+        visit(method_node)
 
     def contains_binary_expression(node):
         if node.type == "binary_expression":
@@ -104,7 +177,7 @@ def detect_xss(filepath, tree, vuln_counter):
                 return True
         return False
 
-    def build_xss_chain(node, used_var):
+    def build_xss_chain(node, used_var, user_input_vars):
         chain = []
         if used_var and used_var in user_input_vars:
             source_code = user_input_vars[used_var]["code"]
@@ -125,6 +198,6 @@ def detect_xss(filepath, tree, vuln_counter):
             chain.append(f"resp.getWriter().{name_node.text.decode()}")
         return chain
 
-    collect_user_inputs(tree.root_node)
-    find_xss(tree.root_node)
+    for method_node in iter_methods(tree.root_node):
+        analyze_method(method_node)
     return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]
