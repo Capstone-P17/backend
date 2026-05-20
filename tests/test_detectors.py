@@ -34,6 +34,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
         assert finding["guide_category"]
         assert finding["guide_item"]
         assert finding["confidence"] in {"HIGH", "MEDIUM", "LOW"}
+        assert finding["confidence_reason"]
         if finding["type"] in {"SQL_INJECTION", "XSS", "HARDCODED_SECRET"}:
             assert finding["evidence"]
 
@@ -71,6 +72,7 @@ def test_vulnerability_schema_requires_enriched_fields() -> None:
             "recommendation": "PreparedStatement를 사용하세요.",
             "safe_example": "PreparedStatement ps = conn.prepareStatement(sql);",
             "confidence": "HIGH",
+            "confidence_reason": "외부 입력이 SQL 실행 API까지 도달합니다.",
         }
         payload.pop(required_field)
         with pytest.raises(ValidationError):

@@ -14,6 +14,7 @@ class DetectorMetadata:
     recommendation: str
     safe_example: str
     confidence: str
+    confidence_reason: str
 
 
 GUIDE_SOURCE = "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」"
@@ -30,6 +31,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="PreparedStatement와 바인딩 파라미터를 사용하고, SQL 문자열에 사용자 입력을 직접 연결하지 마세요.",
         safe_example='PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");\nps.setString(1, userId);',
         confidence="HIGH",
+        confidence_reason="외부 입력 또는 메서드 파라미터가 SQL 문자열 생성 지점을 거쳐 SQL 실행 API까지 도달하는 흐름을 확인했기 때문에 HIGH로 판단했습니다.",
     ),
     "XSS": DetectorMetadata(
         cwe="CWE-79",
@@ -41,6 +43,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="출력 컨텍스트에 맞게 HTML 이스케이프를 적용하고 템플릿 엔진의 자동 이스케이프 기능을 사용하세요.",
         safe_example="String safe = StringEscapeUtils.escapeHtml4(userInput);\nresp.getWriter().println(safe);",
         confidence="HIGH",
+        confidence_reason="사용자 입력이 HTML 응답 출력 지점까지 전달되고, 탐지 가능한 HTML 이스케이프 또는 sanitizer 호출이 확인되지 않았기 때문에 HIGH로 판단했습니다.",
     ),
     "HARDCODED_SECRET": DetectorMetadata(
         cwe="CWE-798",
@@ -52,6 +55,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="비밀 값은 환경 변수, 시크릿 매니저, 안전한 설정 저장소에서 주입하고 저장소 이력의 노출 여부를 점검하세요.",
         safe_example='String apiKey = System.getenv("API_KEY");',
         confidence="MEDIUM",
+        confidence_reason="하드코딩된 문자열이 민감 호출에 사용되는 흐름은 확인했지만, 실제 비밀값의 유효성이나 운영 환경 노출 범위는 정적 분석만으로 확정할 수 없어 MEDIUM으로 판단했습니다.",
     ),
     "PATH_TRAVERSAL": DetectorMetadata(
         cwe="CWE-22",
@@ -63,6 +67,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="입력 파일명을 허용 목록으로 검증하고 정규화된 경로가 기준 디렉터리 내부인지 확인하세요.",
         safe_example="Path base = Paths.get(UPLOAD_DIR).toRealPath();\nPath target = base.resolve(fileName).normalize();\nif (!target.startsWith(base)) throw new SecurityException();",
         confidence="HIGH",
+        confidence_reason="사용자 입력이 경로 생성 또는 파일 접근 API로 직접 전달되는 패턴을 확인했기 때문에 HIGH로 판단했습니다.",
     ),
     "COMMAND_INJECTION": DetectorMetadata(
         cwe="CWE-78",
@@ -74,6 +79,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="쉘 명령 문자열 조합을 피하고, 허용된 명령/인자만 ProcessBuilder에 분리된 인자로 전달하세요.",
         safe_example='ProcessBuilder pb = new ProcessBuilder("/usr/bin/convert", safeInputFile, safeOutputFile);',
         confidence="HIGH",
+        confidence_reason="사용자 입력이 운영체제 명령 실행 API에 전달되는 위험한 호출 흐름을 확인했기 때문에 HIGH로 판단했습니다.",
     ),
     "INSECURE_RANDOM": DetectorMetadata(
         cwe="CWE-338",
@@ -85,6 +91,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="인증 토큰, 세션 ID, 키, nonce 등 보안 값에는 java.security.SecureRandom을 사용하세요.",
         safe_example="SecureRandom random = new SecureRandom();\nbyte[] token = new byte[32];\nrandom.nextBytes(token);",
         confidence="MEDIUM",
+        confidence_reason="예측 가능한 난수 생성기 사용은 확인했지만 해당 값이 실제 보안 토큰이나 키로 쓰이는 전체 맥락은 제한적으로만 확인되므로 MEDIUM으로 판단했습니다.",
     ),
     "WEAK_HASH": DetectorMetadata(
         cwe="CWE-328",
@@ -96,6 +103,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="일반 해시는 SHA-256 이상을 사용하고, 비밀번호 저장에는 bcrypt, scrypt, Argon2 같은 전용 KDF를 사용하세요.",
         safe_example='MessageDigest digest = MessageDigest.getInstance("SHA-256");',
         confidence="HIGH",
+        confidence_reason="MD5 또는 SHA-1처럼 알려진 취약 해시 알고리즘 호출이 코드에서 직접 확인되었기 때문에 HIGH로 판단했습니다.",
     ),
 }
 
@@ -115,4 +123,5 @@ def enrich_finding(finding: dict) -> dict:
     enriched.setdefault("recommendation", metadata.recommendation)
     enriched.setdefault("safe_example", metadata.safe_example)
     enriched.setdefault("confidence", metadata.confidence)
+    enriched.setdefault("confidence_reason", metadata.confidence_reason)
     return enriched

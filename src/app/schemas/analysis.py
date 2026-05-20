@@ -34,6 +34,7 @@ class VulnerabilityFinding(BaseModel):
     recommendation: str
     safe_example: str
     confidence: Confidence
+    confidence_reason: str = ""
 
 
 class SecurityScore(BaseModel):

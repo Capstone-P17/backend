@@ -114,6 +114,8 @@ class SecurityReportGenerator:
                     "evidence": finding.get("evidence"),
                     "recommendation": finding.get("recommendation"),
                     "call_chain": finding.get("call_chain", []),
+                    "confidence": finding.get("confidence"),
+                    "confidence_reason": finding.get("confidence_reason"),
                 }
             )
         return briefs
