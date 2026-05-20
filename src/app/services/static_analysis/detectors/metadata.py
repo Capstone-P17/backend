@@ -111,6 +111,7 @@ def enrich_finding(finding: dict) -> dict:
     enriched.setdefault("guide_category", metadata.guide_category)
     enriched.setdefault("guide_item", metadata.guide_item)
     enriched["description"] = enriched.get("description") or metadata.description
+    enriched.setdefault("evidence", "")
     enriched.setdefault("recommendation", metadata.recommendation)
     enriched.setdefault("safe_example", metadata.safe_example)
     enriched.setdefault("confidence", metadata.confidence)

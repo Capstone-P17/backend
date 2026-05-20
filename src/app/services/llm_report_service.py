@@ -111,6 +111,7 @@ class SecurityReportGenerator:
                     "line": finding.get("line"),
                     "function": finding.get("function"),
                     "description": finding.get("description"),
+                    "evidence": finding.get("evidence"),
                     "recommendation": finding.get("recommendation"),
                     "call_chain": finding.get("call_chain", []),
                 }

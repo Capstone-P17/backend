@@ -59,6 +59,17 @@ def detect_xss(filepath, tree, vuln_counter):
                 return True
         return False
 
+    def find_input_call(node):
+        if node.type == "method_invocation":
+            name_node = node.child_by_field_name("name")
+            if name_node and text(name_node) in INPUT_METHODS:
+                return node
+        for child in node.children:
+            found = find_input_call(child)
+            if found:
+                return found
+        return None
+
     def identifiers(node):
         return {text(child) for child in iterate_all(node) if child.type == "identifier"}
 
@@ -74,6 +85,7 @@ def detect_xss(filepath, tree, vuln_counter):
             user_input_vars[var_name] = source or {
                 "line": source_node.start_point[0] + 1,
                 "code": source_node.text.decode().strip(),
+                "input_call": text(find_input_call(source_node)) if find_input_call(source_node) else None,
             }
 
         def remember_sanitized(var_name):
@@ -163,6 +175,12 @@ def detect_xss(filepath, tree, vuln_counter):
                         "function": find_parent_method(node),
                         "code_snippet": node.text.decode().strip(),
                         "call_chain": build_xss_chain(node, used_var, user_input_vars),
+                        "evidence": build_xss_evidence(
+                            node,
+                            used_var,
+                            user_input_vars,
+                            text(find_input_call(arguments)) if find_input_call(arguments) else None,
+                        ),
                         "description": "",
                     }
                 )
@@ -197,6 +215,30 @@ def detect_xss(filepath, tree, vuln_counter):
         if name_node:
             chain.append(f"resp.getWriter().{name_node.text.decode()}")
         return chain
+
+    def build_xss_evidence(node, used_var, user_input_vars, direct_input_call):
+        sink = build_output_name(node)
+        if used_var and used_var in user_input_vars:
+            source = user_input_vars[used_var].get("input_call") or user_input_vars[used_var]["code"]
+            return (
+                f"`{source}`에서 온 `{used_var}` 값이 HTML 문자열과 결합되어 "
+                f"`{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
+            )
+        if direct_input_call:
+            return (
+                f"`{direct_input_call}` 입력이 HTML 문자열과 직접 결합되어 "
+                f"`{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
+            )
+        return f"외부 입력 값이 HTML 문자열과 결합되어 `{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
+
+    def build_output_name(node):
+        name_node = node.child_by_field_name("name")
+        object_node = node.child_by_field_name("object")
+        if object_node and name_node:
+            return f"{object_node.text.decode()}.{name_node.text.decode()}"
+        if name_node:
+            return name_node.text.decode()
+        return node.text.decode().strip()
 
     for method_node in iter_methods(tree.root_node):
         analyze_method(method_node)

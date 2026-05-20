@@ -47,11 +47,34 @@ def detect_sql_injection(filepath, tree, vuln_counter):
     def identifiers(node):
         return {text(child) for child in iterate_all(node) if child.type == "identifier"}
 
+    def referenced_tainted_vars(node, tainted_vars):
+        seen = set()
+        refs = []
+        for child in iterate_all(node):
+            if child.type != "identifier":
+                continue
+            name = text(child)
+            if name in tainted_vars and name not in seen:
+                seen.add(name)
+                refs.append(name)
+        return refs
+
     def method_name(node):
         if node.type != "method_invocation":
             return None
         name_node = node.child_by_field_name("name")
         return text(name_node) if name_node else None
+
+    def find_input_call(node):
+        if node.type == "method_invocation":
+            name_node = node.child_by_field_name("name")
+            if name_node and text(name_node) in INPUT_METHODS:
+                return node
+        for child in node.children:
+            found = find_input_call(child)
+            if found:
+                return found
+        return None
 
     def contains_sql_keyword(node):
         return any(keyword in text(node).upper() for keyword in SQL_KEYWORDS)
@@ -83,6 +106,7 @@ def detect_sql_injection(filepath, tree, vuln_counter):
 
     def analyze_method(method_node):
         tainted_vars = set(collect_parameter_names(method_node))
+        taint_sources = {var_name: f"메서드 파라미터 `{var_name}`" for var_name in tainted_vars}
         sql_vars = {}
 
         def expression_has_taint(node):
@@ -93,20 +117,40 @@ def detect_sql_injection(filepath, tree, vuln_counter):
             return contains_sql_keyword(node) and contains_sql_builder(node) and expression_has_taint(node)
 
         def update_variable(var_name, value_node, statement_node):
+            source_vars = referenced_tainted_vars(value_node, tainted_vars)
+            input_call = find_input_call(value_node)
             if is_unsafe_sql_expression(value_node):
                 sql_vars[var_name] = {
                     "line": statement_node.start_point[0] + 1,
                     "code": statement_node.text.decode().strip(),
+                    "source_vars": source_vars,
+                    "input_call": text(input_call) if input_call else None,
                 }
                 tainted_vars.add(var_name)
+                taint_sources[var_name] = build_taint_source(value_node, source_vars, input_call)
                 return
 
-            if expression_has_taint(value_node):
+            if input_call:
                 tainted_vars.add(var_name)
+                taint_sources[var_name] = f"`{text(input_call)}`에서 온 `{var_name}`"
+            elif source_vars:
+                tainted_vars.add(var_name)
+                taint_sources[var_name] = taint_sources.get(source_vars[0], f"`{source_vars[0]}`")
+            elif expression_has_taint(value_node):
+                tainted_vars.add(var_name)
+                taint_sources[var_name] = f"`{var_name}`"
             else:
                 tainted_vars.discard(var_name)
+                taint_sources.pop(var_name, None)
 
             sql_vars.pop(var_name, None)
+
+        def build_taint_source(node, source_vars, input_call):
+            if input_call:
+                return f"`{text(input_call)}`"
+            if source_vars:
+                return ", ".join(taint_sources.get(var_name, f"`{var_name}`") for var_name in source_vars)
+            return "외부 입력 값"
 
         def visit(node):
             if node.type == "method_declaration" and node is not method_node:
@@ -150,6 +194,7 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                     line=var["line"],
                     code=var["code"],
                     call_chain=build_call_chain(node, matched_sql_var),
+                    evidence=build_sql_evidence(node, matched_sql_var, var),
                 )
                 return
 
@@ -159,9 +204,32 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                     line=node.start_point[0] + 1,
                     code=node.text.decode().strip(),
                     call_chain=build_call_chain(node),
+                    evidence=build_sql_evidence(
+                        node,
+                        None,
+                        {
+                            "source_vars": referenced_tainted_vars(arguments, tainted_vars),
+                            "input_call": text(find_input_call(arguments)) if find_input_call(arguments) else None,
+                        },
+                    ),
                 )
 
-        def add_finding(node, line, code, call_chain):
+        def build_sql_evidence(node, sql_var, sql_info):
+            sink = build_sink_name(node)
+            source_vars = sql_info.get("source_vars") or []
+            input_call = sql_info.get("input_call")
+            source = f"`{input_call}`에서 온 입력이" if input_call else ""
+            if not source and source_vars:
+                source_parts = [taint_sources.get(var_name, f"`{var_name}`") for var_name in source_vars]
+                source = f"{', '.join(source_parts)} 값이"
+            if not source:
+                source = "외부 입력으로 추정되는 값이"
+
+            if sql_var:
+                return f"{source} SQL 문자열 `{sql_var}`에 결합된 뒤 `{sink}`로 실행됩니다."
+            return f"{source} SQL 문자열에 직접 결합된 뒤 `{sink}`로 실행됩니다."
+
+        def add_finding(node, line, code, call_chain, evidence):
             severity = _determine_severity(code)
             vuln_counter[0] += 1
             vulnerabilities.append(
@@ -175,6 +243,7 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                     "function": find_parent_method(node),
                     "code_snippet": code,
                     "call_chain": call_chain,
+                    "evidence": evidence,
                     "description": "",
                 }
             )
@@ -194,6 +263,15 @@ def detect_sql_injection(filepath, tree, vuln_counter):
         if object_node and name_node:
             chain.append(f"{object_node.text.decode()}.{name_node.text.decode()}")
         return chain
+
+    def build_sink_name(node):
+        name_node = node.child_by_field_name("name")
+        object_node = node.child_by_field_name("object")
+        if object_node and name_node:
+            return f"{object_node.text.decode()}.{name_node.text.decode()}"
+        if name_node:
+            return name_node.text.decode()
+        return node.text.decode().strip()
 
     for method_node in iter_methods(tree.root_node):
         analyze_method(method_node)

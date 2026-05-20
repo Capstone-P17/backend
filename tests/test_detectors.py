@@ -34,6 +34,8 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
         assert finding["guide_category"]
         assert finding["guide_item"]
         assert finding["confidence"] in {"HIGH", "MEDIUM", "LOW"}
+        if finding["type"] in {"SQL_INJECTION", "XSS", "HARDCODED_SECRET"}:
+            assert finding["evidence"]
 
 
 def test_vulnerability_schema_requires_enriched_fields() -> None:
@@ -46,6 +48,7 @@ def test_vulnerability_schema_requires_enriched_fields() -> None:
         "function": "findUser",
         "code_snippet": "stmt.executeQuery(sql)",
         "call_chain": [],
+        "evidence": "sql 값이 stmt.executeQuery로 실행됩니다.",
         "description": "사용자 입력이 SQL에 직접 결합됩니다.",
         "cvss": {"score": 7.5, "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
     }
@@ -116,6 +119,8 @@ public class XssFlowController {
     assert [finding["type"] for finding in findings] == ["XSS"]
     assert findings[0]["function"] == "unsafe"
     assert "decorated" in findings[0]["code_snippet"]
+    assert "decorated" in findings[0]["evidence"]
+    assert "HTML 이스케이프" in findings[0]["evidence"]
 
 
 def test_hardcoded_secret_requires_sensitive_usage_flow(tmp_path: Path) -> None:
@@ -161,6 +166,8 @@ public class SecretFlowController {
         "선언 line 7",
         "사용 line 17",
     ]
+    assert "`dbPassword`" in findings[0]["evidence"]
+    assert "getConnection" in findings[0]["evidence"]
 
 
 def test_sql_injection_requires_tainted_sql_execution_flow(tmp_path: Path) -> None:
@@ -215,3 +222,5 @@ public class SqlFlowController {
         "unsafeConcatMethod",
     ]
     assert all("executeQuery" in finding["call_chain"][-1] for finding in findings)
+    assert all("executeQuery" in finding["evidence"] for finding in findings)
+    assert any("String.format" in finding["code_snippet"] for finding in findings)

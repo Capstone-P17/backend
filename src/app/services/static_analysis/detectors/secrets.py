@@ -88,6 +88,15 @@ def _build_secret_chain(declaration_node, usage_node):
     return chain
 
 
+def _build_secret_evidence(var_name, declaration_node, usage_node):
+    usage_method = _usage_method_name(usage_node)
+    usage_name = usage_method or _object_creation_class_name(usage_node) or "민감 API"
+    return (
+        f"`{var_name}`가 line {declaration_node.start_point[0] + 1}에서 문자열 리터럴로 하드코딩되어 선언되고, "
+        f"line {usage_node.start_point[0] + 1}의 `{usage_name}` 호출에서 인증/연결 정보로 사용됩니다."
+    )
+
+
 def detect_hardcoded_secrets(filepath, tree, vuln_counter):
     vulnerabilities = []
     candidates = {}
@@ -139,6 +148,7 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
                 "function": find_parent_method(declaration),
                 "code_snippet": declaration.text.decode().strip(),
                 "call_chain": _build_secret_chain(declaration, node),
+                "evidence": _build_secret_evidence(var_name, declaration, node),
                 "description": "",
             }
         )

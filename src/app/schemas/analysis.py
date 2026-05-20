@@ -29,6 +29,7 @@ class VulnerabilityFinding(BaseModel):
     function: str | None = None
     code_snippet: str | None = None
     call_chain: list[str] = Field(default_factory=list)
+    evidence: str = ""
     description: str
     recommendation: str
     safe_example: str
