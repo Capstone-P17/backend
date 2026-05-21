@@ -105,6 +105,23 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence="HIGH",
         confidence_reason="MD5 또는 SHA-1처럼 알려진 취약 해시 알고리즘 호출이 코드에서 직접 확인되었기 때문에 HIGH로 판단했습니다.",
     ),
+    "DANGEROUS_FILE_UPLOAD": DetectorMetadata(
+        cwe="CWE-434",
+        severity="HIGH",
+        guide_source=GUIDE_SOURCE,
+        guide_category="입력데이터 검증 및 표현",
+        guide_item="위험한 형식 파일 업로드",
+        description="업로드 파일의 확장자 또는 Content-Type을 허용목록으로 제한하지 않고 서버에 저장하여, 실행 가능한 파일이나 악성 파일이 업로드될 수 있습니다.",
+        recommendation="업로드 전에 허용 확장자와 Content-Type을 allowlist로 검증하고, 저장 경로와 파일명을 서버가 통제하는 값으로 재생성하세요.",
+        safe_example=(
+            'Set<String> allowedExtensions = Set.of("jpg", "png", "pdf");\n'
+            'String ext = FilenameUtils.getExtension(file.getOriginalFilename()).toLowerCase(Locale.ROOT);\n'
+            "if (!allowedExtensions.contains(ext)) throw new SecurityException();\n"
+            "file.transferTo(targetPath);"
+        ),
+        confidence="HIGH",
+        confidence_reason="업로드 파일 객체가 파일 저장 API로 전달되고, 저장 전에 확장자 또는 Content-Type 허용목록 검증이 확인되지 않았기 때문에 HIGH로 판단했습니다.",
+    ),
 }
 
 

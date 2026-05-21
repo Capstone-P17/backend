@@ -17,6 +17,7 @@ EXPECTED_TYPES = {
     "COMMAND_INJECTION",
     "INSECURE_RANDOM",
     "WEAK_HASH",
+    "DANGEROUS_FILE_UPLOAD",
 }
 
 
@@ -24,7 +25,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
     result = AnalyzerService(PROJECT_ROOT).analyze("src/analyzer/test_samples")
     analysis = result["analysis_result"]
     assert analysis["files_analyzed"] == 7
-    assert analysis["summary"]["total_vulnerabilities"] == 21
+    assert analysis["summary"]["total_vulnerabilities"] == 23
     assert {finding["type"] for finding in analysis["vulnerabilities"]} == EXPECTED_TYPES
     for finding in analysis["vulnerabilities"]:
         assert finding["description"]
@@ -35,7 +36,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
         assert finding["guide_item"]
         assert finding["confidence"] in {"HIGH", "MEDIUM", "LOW"}
         assert finding["confidence_reason"]
-        if finding["type"] in {"SQL_INJECTION", "XSS", "HARDCODED_SECRET"}:
+        if finding["type"] in {"SQL_INJECTION", "XSS", "HARDCODED_SECRET", "DANGEROUS_FILE_UPLOAD"}:
             assert finding["evidence"]
 
 
@@ -125,6 +126,51 @@ public class XssFlowController {
     assert "HTML 이스케이프" in findings[0]["evidence"]
 
 
+def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
+    sample = tmp_path / "UploadController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import org.springframework.web.multipart.MultipartFile;
+
+public class UploadController {
+    public void unsafeTransfer(MultipartFile file) throws IOException {
+        Path target = Paths.get("uploads", "profile.tmp");
+        file.transferTo(target);
+    }
+
+    public void unsafeCopy(MultipartFile file) throws IOException {
+        Files.copy(file.getInputStream(), Paths.get("uploads", "document.tmp"));
+    }
+
+    public void safeUpload(MultipartFile file) throws IOException {
+        Set<String> allowedExtensions = Set.of("png", "jpg");
+        String originalName = file.getOriginalFilename();
+        String ext = originalName.substring(originalName.lastIndexOf(".") + 1);
+        if (!allowedExtensions.contains(ext)) {
+            throw new SecurityException("Unsupported upload type");
+        }
+        file.transferTo(Paths.get("uploads", "safe." + ext));
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "DANGEROUS_FILE_UPLOAD"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeTransfer", "unsafeCopy"]
+    assert all(finding["guide_item"] == "위험한 형식 파일 업로드" for finding in findings)
+    assert all("허용목록 검증" in finding["evidence"] for finding in findings)
+
+
 def test_hardcoded_secret_requires_sensitive_usage_flow(tmp_path: Path) -> None:
     sample = tmp_path / "SecretFlowController.java"
     sample.write_text(
@@ -166,7 +212,7 @@ public class SecretFlowController {
         "SecretFlowController.connect",
         "getConnection",
         "선언 line 7",
-        "사용 line 17",
+        "사용 line 18",
     ]
     assert "`dbPassword`" in findings[0]["evidence"]
     assert "getConnection" in findings[0]["evidence"]

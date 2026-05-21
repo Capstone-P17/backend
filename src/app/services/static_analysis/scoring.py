@@ -67,6 +67,9 @@ def build_summary(vulnerabilities, files):
             "COMMAND_INJECTION": sum(1 for vulnerability in vulnerabilities if vulnerability["type"] == "COMMAND_INJECTION"),
             "INSECURE_RANDOM": sum(1 for vulnerability in vulnerabilities if vulnerability["type"] == "INSECURE_RANDOM"),
             "WEAK_HASH": sum(1 for vulnerability in vulnerabilities if vulnerability["type"] == "WEAK_HASH"),
+            "DANGEROUS_FILE_UPLOAD": sum(
+                1 for vulnerability in vulnerabilities if vulnerability["type"] == "DANGEROUS_FILE_UPLOAD"
+            ),
         },
         "by_guide_category": count_by_guide_category(vulnerabilities),
         "score": calculate_scores(vulnerabilities, files),

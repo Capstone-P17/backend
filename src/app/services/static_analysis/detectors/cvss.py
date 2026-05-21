@@ -54,6 +54,12 @@ CVSS_PRESETS: dict[str, dict[str, dict]] = {
             "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
         },
     },
+    "DANGEROUS_FILE_UPLOAD": {
+        "HIGH": {
+            "score": 8.8,
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+        },
+    },
 }
 
 

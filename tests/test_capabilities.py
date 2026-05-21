@@ -22,4 +22,5 @@ def test_capabilities_is_public_and_java_rule_based(unauthenticated_client) -> N
         "COMMAND_INJECTION",
         "INSECURE_RANDOM",
         "WEAK_HASH",
+        "DANGEROUS_FILE_UPLOAD",
     }
