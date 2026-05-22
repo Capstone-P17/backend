@@ -15,6 +15,31 @@ class CvssInfo(BaseModel):
     vector: str | None = None
 
 
+class GuidelineCitation(BaseModel):
+    source: str
+    version: str
+    page_start: int
+    page_end: int
+    section: str
+
+
+class GuidelineReference(BaseModel):
+    id: str
+    source_title: str
+    source_version: str
+    source_file: str
+    category: str
+    item: str
+    page_start: int
+    page_end: int
+    detector_types: list[str] = Field(default_factory=list)
+    cwe: list[str] = Field(default_factory=list)
+    overview: str = ""
+    security_measures: str = ""
+    diagnosis: str = ""
+    citations: list[GuidelineCitation] = Field(default_factory=list)
+
+
 class VulnerabilityFinding(BaseModel):
     id: str
     type: str
@@ -35,6 +60,7 @@ class VulnerabilityFinding(BaseModel):
     safe_example: str
     confidence: Confidence
     confidence_reason: str = ""
+    guideline_refs: list[GuidelineReference] = Field(default_factory=list)
 
 
 class SecurityScore(BaseModel):

@@ -17,6 +17,7 @@ from src.app.services.result_store import AnalysisResultStore
 
 if TYPE_CHECKING:
     from src.app.services.analyzer_service import AnalyzerService
+    from src.app.services.guidelines.repository import GuidelineRepository
     from src.app.services.llm_report_service import SecurityReportGenerator
 
 _GITHUB_REPO_URL_RE = re.compile(
@@ -75,6 +76,7 @@ class AnalysisService:
         analyzer_service: AnalyzerService,
         result_store: AnalysisResultStore,
         report_generator: SecurityReportGenerator | None = None,
+        guideline_repository: GuidelineRepository | None = None,
     ) -> None:
         self.settings = settings
         self.analyzer_service = analyzer_service
@@ -84,6 +86,11 @@ class AnalysisService:
 
             report_generator = SecurityReportGenerator(settings)
         self.report_generator = report_generator
+        if guideline_repository is None:
+            from src.app.services.guidelines.repository import get_guideline_repository
+
+            guideline_repository = get_guideline_repository()
+        self.guideline_repository = guideline_repository
 
     def analyze_uploaded_file(self, filename: str, content: bytes, user_id: int) -> dict[str, object]:
         try:
@@ -375,6 +382,7 @@ class AnalysisService:
 
     def _save_public_result(self, result: dict[str, object], user_id: int) -> dict[str, object]:
         sanitized_result = self._sanitize_public_result(result)
+        self._attach_guideline_references(sanitized_result)
         self._attach_llm_report(sanitized_result)
         analysis_id = self.result_store.save(sanitized_result, user_id)
         return self._build_analysis_response(analysis_id, sanitized_result)
@@ -422,3 +430,18 @@ class AnalysisService:
             analysis["llm_report"] = None
             analysis["llm_report_status"] = "failed"
             analysis["llm_report_error"] = str(exc) or "LLM 리포트 생성에 실패했습니다."
+
+    def _attach_guideline_references(self, result: dict[str, object]) -> None:
+        analysis = result.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return
+
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            return
+
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            references = self.guideline_repository.find_for_finding(finding)
+            finding["guideline_refs"] = [reference.to_finding_payload() for reference in references]

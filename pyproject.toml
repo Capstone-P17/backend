@@ -26,6 +26,12 @@ dependencies = [
     "reportlab>=4.5.1",
 ]
 
+[project.scripts]
+convert-security-guide = "app.tools.convert_security_guide:main"
+
+[tool.uv]
+package = true
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

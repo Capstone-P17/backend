@@ -116,6 +116,11 @@ class SecurityReportGenerator:
                     "call_chain": finding.get("call_chain", []),
                     "confidence": finding.get("confidence"),
                     "confidence_reason": finding.get("confidence_reason"),
+                    "guideline_refs": [
+                        _build_guideline_brief(reference)
+                        for reference in finding.get("guideline_refs", [])
+                        if isinstance(reference, dict)
+                    ],
                 }
             )
         return briefs
@@ -135,3 +140,23 @@ class SecurityReportGenerator:
             return "\n".join(part for part in text_parts if part).strip()
 
         return str(content)
+
+
+def _build_guideline_brief(reference: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": reference.get("id"),
+        "source": reference.get("source_title"),
+        "version": reference.get("source_version"),
+        "section": f"{reference.get('category')} - {reference.get('item')}",
+        "pages": [reference.get("page_start"), reference.get("page_end")],
+        "overview": _truncate(str(reference.get("overview") or ""), max_chars=1200),
+        "security_measures": _truncate(str(reference.get("security_measures") or ""), max_chars=1200),
+        "diagnosis": _truncate(str(reference.get("diagnosis") or ""), max_chars=1200),
+        "citations": reference.get("citations", []),
+    }
+
+
+def _truncate(value: str, *, max_chars: int) -> str:
+    if max_chars <= 0 or len(value) <= max_chars:
+        return value
+    return f"{value[:max_chars].rstrip()}…"
