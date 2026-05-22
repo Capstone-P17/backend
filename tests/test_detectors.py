@@ -24,7 +24,7 @@ EXPECTED_TYPES = {
 def test_sample_analysis_detects_expected_java_findings() -> None:
     result = AnalyzerService(PROJECT_ROOT).analyze("src/analyzer/test_samples")
     analysis = result["analysis_result"]
-    assert analysis["files_analyzed"] == 7
+    assert analysis["files_analyzed"] == 8
     assert analysis["summary"]["total_vulnerabilities"] == 23
     assert {finding["type"] for finding in analysis["vulnerabilities"]} == EXPECTED_TYPES
     for finding in analysis["vulnerabilities"]:
