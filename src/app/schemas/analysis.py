@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 Confidence = Literal["HIGH", "MEDIUM", "LOW"]
 LLMReportStatus = Literal["unavailable", "generated", "failed"]
+GuidelineGroundingStatus = Literal["matched", "missing", "ambiguous"]
+FindingAnalysisStatus = Literal["confirmed", "needs_review"]
+LLMExplanationStatus = Literal["unavailable", "generated", "skipped", "failed"]
 
 
 class CvssInfo(BaseModel):
@@ -40,6 +43,15 @@ class GuidelineReference(BaseModel):
     citations: list[GuidelineCitation] = Field(default_factory=list)
 
 
+class FindingLLMExplanation(BaseModel):
+    why_vulnerable: str
+    how_to_fix: str
+    fix_steps: list[str] = Field(default_factory=list)
+    cited_guideline_ids: list[str] = Field(default_factory=list)
+    citations: list[GuidelineCitation] = Field(default_factory=list)
+    grounding_notes: str | None = None
+
+
 class VulnerabilityFinding(BaseModel):
     id: str
     type: str
@@ -61,6 +73,11 @@ class VulnerabilityFinding(BaseModel):
     confidence: Confidence
     confidence_reason: str = ""
     guideline_refs: list[GuidelineReference] = Field(default_factory=list)
+    guideline_grounding_status: GuidelineGroundingStatus = "missing"
+    analysis_status: FindingAnalysisStatus = "needs_review"
+    llm_explanation_status: LLMExplanationStatus = "unavailable"
+    llm_explanation: FindingLLMExplanation | None = None
+    llm_explanation_error: str | None = None
 
 
 class SecurityScore(BaseModel):

@@ -162,6 +162,67 @@ def test_analysis_result_attaches_guideline_references_before_storage() -> None:
     assert finding["guideline_refs"][0]["item"] == "SQL 삽입"
     assert finding["guideline_refs"][0]["page_start"] == 178
     assert "PreparedStatement" in finding["guideline_refs"][0]["security_measures"]
+    assert finding["guideline_grounding_status"] == "matched"
+    assert finding["analysis_status"] == "confirmed"
+
+
+def test_analysis_result_keeps_unmapped_findings_as_needs_review() -> None:
+    class FakeAnalyzerService:
+        def analyze(self, target_path: str, repository: str = "") -> dict:
+            return {
+                "analysis_result": {
+                    "repository": repository,
+                    "target_path": target_path,
+                    "language": "java",
+                    "files_analyzed": 1,
+                    "analyzed_at": "2026-01-01T00:00:00",
+                    "call_graph": {},
+                    "summary": {
+                        "total_vulnerabilities": 1,
+                        "by_type": {"UNKNOWN_STATIC_FINDING": 1},
+                        "by_guide_category": {},
+                        "by_severity": {"LOW": 1},
+                        "score": {"overall": 95, "by_file": {"Unknown.java": 95}},
+                    },
+                    "vulnerabilities": [
+                        {
+                            "id": "VULN-999",
+                            "type": "UNKNOWN_STATIC_FINDING",
+                            "severity": "LOW",
+                            "cwe": "CWE-000",
+                            "guide_source": "",
+                            "guide_category": "",
+                            "guide_item": "",
+                            "file": "Unknown.java",
+                            "line": 1,
+                            "function": "run",
+                            "code_snippet": "unknown();",
+                            "call_chain": [],
+                            "evidence": "정적 분석 evidence는 존재합니다.",
+                            "description": "미매핑 정적 분석 finding",
+                            "recommendation": "검토가 필요합니다.",
+                            "safe_example": "",
+                            "confidence": "LOW",
+                            "confidence_reason": "테스트용 finding입니다.",
+                        }
+                    ],
+                }
+            }
+
+    settings = get_settings()
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=FakeAnalyzerService(),  # type: ignore[arg-type]
+        result_store=AnalysisResultStore(),
+    )
+
+    response = service.analyze_uploaded_file("Unknown.java", java_bytes(), user_id=1)
+    findings = response["analysis_result"]["vulnerabilities"]
+
+    assert len(findings) == 1
+    assert findings[0]["guideline_refs"] == []
+    assert findings[0]["guideline_grounding_status"] == "missing"
+    assert findings[0]["analysis_status"] == "needs_review"
 
 
 def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
@@ -233,6 +294,11 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
             "call_chain": ["AuthController.login", "LoginService.authenticate"],
             "confidence": "HIGH",
             "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
+            "guideline_grounding_status": None,
+            "analysis_status": None,
+            "llm_explanation_status": None,
+            "llm_explanation": None,
+            "llm_explanation_error": None,
             "guideline_refs": [
                 {
                     "id": "kr-sw-security-guide-2019-sql-injection",

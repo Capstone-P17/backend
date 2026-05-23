@@ -445,3 +445,11 @@ class AnalysisService:
                 continue
             references = self.guideline_repository.find_for_finding(finding)
             finding["guideline_refs"] = [reference.to_finding_payload() for reference in references]
+            if references:
+                finding["guideline_grounding_status"] = "matched"
+                finding["analysis_status"] = "confirmed"
+            else:
+                finding["guideline_grounding_status"] = "missing"
+                finding["analysis_status"] = "needs_review"
+            finding.setdefault("llm_explanation_status", "unavailable")
+            finding.setdefault("llm_explanation", None)
