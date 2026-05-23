@@ -13,6 +13,7 @@ from zipfile import BadZipFile, ZipFile, ZipInfo
 import httpx
 
 from src.app.core.config import Settings
+from src.app.services.llm_report_service import ContextBudgetExceededError
 from src.app.services.result_store import AnalysisResultStore
 
 if TYPE_CHECKING:
@@ -426,6 +427,10 @@ class AnalysisService:
             )
             analysis["llm_report_status"] = "generated"
             analysis["llm_report_error"] = None
+        except ContextBudgetExceededError as exc:
+            analysis["llm_report"] = None
+            analysis["llm_report_status"] = "skipped_context_budget_exceeded"
+            analysis["llm_report_error"] = str(exc) or "LLM 리포트 입력이 context budget을 초과했습니다."
         except Exception as exc:  # noqa: BLE001 - static results should survive LLM outages
             analysis["llm_report"] = None
             analysis["llm_report_status"] = "failed"

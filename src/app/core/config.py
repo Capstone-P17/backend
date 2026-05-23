@@ -70,6 +70,77 @@ class Settings(BaseModel):
             "AGENT_ANALYSIS_MAX_FINDINGS_IN_PROMPT",
         ),
     )
+    llm_guideline_overview_max_chars: int = Field(
+        default=600,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_GUIDELINE_OVERVIEW_MAX_CHARS",
+            "AGENT_LLM_GUIDELINE_OVERVIEW_MAX_CHARS",
+        ),
+    )
+    llm_guideline_security_measures_max_chars: int = Field(
+        default=800,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_GUIDELINE_SECURITY_MEASURES_MAX_CHARS",
+            "AGENT_LLM_GUIDELINE_SECURITY_MEASURES_MAX_CHARS",
+        ),
+    )
+    llm_guideline_diagnosis_max_chars: int = Field(
+        default=800,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_GUIDELINE_DIAGNOSIS_MAX_CHARS",
+            "AGENT_LLM_GUIDELINE_DIAGNOSIS_MAX_CHARS",
+        ),
+    )
+    llm_finding_evidence_max_chars: int = Field(
+        default=800,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_FINDING_EVIDENCE_MAX_CHARS",
+            "AGENT_LLM_FINDING_EVIDENCE_MAX_CHARS",
+        ),
+    )
+    llm_report_max_detailed_findings: int = Field(
+        default=20,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_REPORT_MAX_DETAILED_FINDINGS",
+            "AGENT_LLM_REPORT_MAX_DETAILED_FINDINGS",
+        ),
+    )
+    llm_report_max_findings_per_group: int = Field(
+        default=5,
+        ge=1,
+        validation_alias=AliasChoices(
+            "LLM_REPORT_MAX_FINDINGS_PER_GROUP",
+            "AGENT_LLM_REPORT_MAX_FINDINGS_PER_GROUP",
+        ),
+    )
+    llm_report_group_summary_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "LLM_REPORT_GROUP_SUMMARY_ENABLED",
+            "AGENT_LLM_REPORT_GROUP_SUMMARY_ENABLED",
+        ),
+    )
+    llm_report_payload_max_chars: int = Field(
+        default=240_000,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_REPORT_PAYLOAD_MAX_CHARS",
+            "AGENT_LLM_REPORT_PAYLOAD_MAX_CHARS",
+        ),
+    )
+    llm_finding_explanation_payload_max_chars: int = Field(
+        default=24_000,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_FINDING_EXPLANATION_PAYLOAD_MAX_CHARS",
+            "AGENT_LLM_FINDING_EXPLANATION_PAYLOAD_MAX_CHARS",
+        ),
+    )
     max_upload_bytes: int = Field(
         default=DEFAULT_MAX_UPLOAD_BYTES,
         ge=1,

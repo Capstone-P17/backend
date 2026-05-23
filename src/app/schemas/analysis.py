@@ -7,10 +7,10 @@ from pydantic import BaseModel, Field
 
 Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 Confidence = Literal["HIGH", "MEDIUM", "LOW"]
-LLMReportStatus = Literal["unavailable", "generated", "failed"]
+LLMReportStatus = Literal["unavailable", "generated", "failed", "skipped_context_budget_exceeded"]
 GuidelineGroundingStatus = Literal["matched", "missing", "ambiguous"]
 FindingAnalysisStatus = Literal["confirmed", "needs_review"]
-LLMExplanationStatus = Literal["unavailable", "generated", "skipped", "failed"]
+LLMExplanationStatus = Literal["unavailable", "generated", "skipped", "failed", "skipped_context_budget_exceeded"]
 
 
 class CvssInfo(BaseModel):

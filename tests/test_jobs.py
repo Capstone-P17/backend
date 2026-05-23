@@ -23,7 +23,7 @@ def fake_analysis_response() -> dict:
 
 
 def test_repository_job_success_path(client, analysis_service) -> None:
-    analysis_service.analyze_github_repository = lambda url: fake_analysis_response()  # type: ignore[method-assign]
+    analysis_service.analyze_github_repository = lambda url, user_id: fake_analysis_response()  # type: ignore[method-assign]
     response = client.post("/analyze/repository/jobs", json={"url": "https://github.com/acme/repo"})
     assert response.status_code == 202
     payload = response.json()
@@ -37,7 +37,7 @@ def test_repository_job_success_path(client, analysis_service) -> None:
 
 
 def test_repository_job_failure_path(client, analysis_service) -> None:
-    def fail(url: str) -> dict:
+    def fail(url: str, user_id: int) -> dict:
         raise RuntimeError("boom")
 
     analysis_service.analyze_github_repository = fail  # type: ignore[method-assign]

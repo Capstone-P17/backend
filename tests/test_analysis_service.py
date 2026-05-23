@@ -281,44 +281,55 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
         }
     )
 
-    assert payload["vulnerabilities"] == [
-        {
-            "type": "SQL_INJECTION",
-            "severity": "HIGH",
-            "file": "src/LoginService.java",
-            "line": 12,
-            "function": "authenticate",
-            "description": "사용자 입력이 그대로 SQL에 연결됩니다.",
-            "evidence": "외부 입력이 SQL 실행 API로 전달됩니다.",
-            "recommendation": "PreparedStatement를 사용하세요.",
-            "call_chain": ["AuthController.login", "LoginService.authenticate"],
-            "confidence": "HIGH",
-            "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
-            "guideline_grounding_status": None,
-            "analysis_status": None,
-            "llm_explanation_status": None,
-            "llm_explanation": None,
-            "llm_explanation_error": None,
-            "guideline_refs": [
+    assert payload["finding_selection"]["total_static_findings"] == 1
+    assert payload["vulnerabilities"][0] == {
+        "id": None,
+        "type": "SQL_INJECTION",
+        "severity": "HIGH",
+        "file": "src/LoginService.java",
+        "line": 12,
+        "function": "authenticate",
+        "description": "사용자 입력이 그대로 SQL에 연결됩니다.",
+        "evidence": "외부 입력이 SQL 실행 API로 전달됩니다.",
+        "recommendation": "PreparedStatement를 사용하세요.",
+        "call_chain": ["AuthController.login", "LoginService.authenticate"],
+        "confidence": "HIGH",
+        "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
+        "guideline_grounding_status": None,
+        "analysis_status": None,
+        "llm_explanation_status": None,
+        "llm_explanation": None,
+        "llm_explanation_error": None,
+        "guideline_ref_ids": ["kr-sw-security-guide-2019-sql-injection"],
+        "citations": [
+            {
+                "source": "소프트웨어 보안약점 진단가이드",
+                "version": "2019.6 개정",
+                "page_start": 178,
+                "page_end": 191,
+                "section": "입력데이터 검증 및 표현 - SQL 삽입",
+            }
+        ],
+    }
+    assert "guideline_refs" not in payload["vulnerabilities"][0]
+    assert payload["guideline_catalog"] == {
+        "kr-sw-security-guide-2019-sql-injection": {
+            "id": "kr-sw-security-guide-2019-sql-injection",
+            "source": "소프트웨어 보안약점 진단가이드",
+            "version": "2019.6 개정",
+            "section": "입력데이터 검증 및 표현 - SQL 삽입",
+            "pages": [178, 191],
+            "detector_types": [],
+            "cwe": [],
+            "allowed_citations": [
                 {
-                    "id": "kr-sw-security-guide-2019-sql-injection",
                     "source": "소프트웨어 보안약점 진단가이드",
                     "version": "2019.6 개정",
+                    "page_start": 178,
+                    "page_end": 191,
                     "section": "입력데이터 검증 및 표현 - SQL 삽입",
-                    "pages": [178, 191],
-                    "overview": "SQL 삽입 개요",
-                    "security_measures": "PreparedStatement를 사용한다.",
-                    "diagnosis": "Statement 객체를 통해 쿼리가 실행되는 부분을 확인한다.",
-                    "citations": [
-                        {
-                            "source": "소프트웨어 보안약점 진단가이드",
-                            "version": "2019.6 개정",
-                            "page_start": 178,
-                            "page_end": 191,
-                            "section": "입력데이터 검증 및 표현 - SQL 삽입",
-                        }
-                    ],
                 }
             ],
         }
-    ]
+    }
+    assert "overview" not in payload["guideline_catalog"]["kr-sw-security-guide-2019-sql-injection"]
