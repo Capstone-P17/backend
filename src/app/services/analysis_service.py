@@ -384,6 +384,7 @@ class AnalysisService:
     def _save_public_result(self, result: dict[str, object], user_id: int) -> dict[str, object]:
         sanitized_result = self._sanitize_public_result(result)
         self._attach_guideline_references(sanitized_result)
+        self._attach_finding_explanations(sanitized_result)
         self._attach_llm_report(sanitized_result)
         analysis_id = self.result_store.save(sanitized_result, user_id)
         return self._build_analysis_response(analysis_id, sanitized_result)
@@ -403,6 +404,12 @@ class AnalysisService:
         if isinstance(analysis, dict):
             analysis.setdefault("target_path", None)
         return sanitized
+
+    def _attach_finding_explanations(self, result: dict[str, object]) -> None:
+        attach = getattr(self.report_generator, "attach_finding_explanations", None)
+        if not callable(attach):
+            return
+        attach(result)
 
     def _attach_llm_report(self, result: dict[str, object]) -> None:
         analysis = result.get("analysis_result", {})

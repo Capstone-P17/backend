@@ -28,6 +28,20 @@ class SecurityReportGenerator:
     def is_available(self) -> bool:
         return bool(self.settings.openai_api_key)
 
+    def attach_finding_explanations(self, result: dict[str, Any]) -> None:
+        """Attach per-finding dynamic explanations when an LLM is configured.
+
+        Static detector metadata remains in the finding as fallback text. This method only
+        populates the optional llm_explanation fields used by clients that want a
+        finding-specific explanation.
+        """
+        if not self.is_available:
+            self._mark_finding_explanations_unavailable(result)
+            return
+
+        llm = self._create_llm()
+        self._attach_finding_explanations(result, llm)
+
     def generate(
         self,
         *,
@@ -262,6 +276,21 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                 )
         return catalog
 
+    def _mark_finding_explanations_unavailable(self, result: dict[str, Any]) -> None:
+        analysis = result.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            return
+
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            finding.setdefault("llm_explanation_status", "unavailable")
+            finding.setdefault("llm_explanation", None)
+            finding.setdefault("llm_explanation_error", None)
+
     def _attach_finding_explanations(self, result: dict[str, Any], llm: Any) -> None:
         analysis = result.get("analysis_result", {})
         if not isinstance(analysis, dict):
@@ -272,6 +301,8 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
 
         for finding in vulnerabilities[: self.settings.analysis_max_findings_in_prompt]:
             if not isinstance(finding, dict):
+                continue
+            if self._has_final_finding_explanation_state(finding):
                 continue
             if not finding.get("guideline_refs"):
                 finding["llm_explanation_status"] = "skipped"
@@ -299,6 +330,13 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                 finding["llm_explanation_status"] = "failed"
                 finding["llm_explanation"] = None
                 finding["llm_explanation_error"] = str(exc) or "finding 설명 생성에 실패했습니다."
+
+    @staticmethod
+    def _has_final_finding_explanation_state(finding: dict[str, Any]) -> bool:
+        status = finding.get("llm_explanation_status")
+        if status in (None, "", "unavailable"):
+            return False
+        return True
 
     def _generate_finding_explanation(self, finding: dict[str, Any], llm: Any) -> dict[str, Any]:
         from langchain_core.prompts import ChatPromptTemplate

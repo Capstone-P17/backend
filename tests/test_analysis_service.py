@@ -104,6 +104,87 @@ def test_analysis_result_includes_generated_llm_report_when_available() -> None:
     assert result_store.get(response["analysis_id"], user_id=1)["analysis_result"]["llm_report"] == "LLM 리포트 본문"
 
 
+def test_analysis_result_attaches_finding_explanations_before_llm_report() -> None:
+    class FakeAnalyzerService:
+        def analyze(self, target_path: str, repository: str = "") -> dict:
+            return {
+                "analysis_result": {
+                    "repository": repository,
+                    "target_path": target_path,
+                    "language": "java",
+                    "files_analyzed": 1,
+                    "analyzed_at": "2026-01-01T00:00:00",
+                    "call_graph": {},
+                    "summary": {
+                        "total_vulnerabilities": 1,
+                        "by_type": {"SQL_INJECTION": 1},
+                        "by_guide_category": {"입력데이터 검증 및 표현": 1},
+                        "by_severity": {"HIGH": 1},
+                        "score": {"overall": 90, "by_file": {"Unsafe.java": 90}},
+                    },
+                    "vulnerabilities": [
+                        {
+                            "id": "VULN-001",
+                            "type": "SQL_INJECTION",
+                            "severity": "HIGH",
+                            "cwe": "CWE-89",
+                            "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
+                            "guide_category": "입력데이터 검증 및 표현",
+                            "guide_item": "SQL 삽입",
+                            "file": "Unsafe.java",
+                            "line": 1,
+                            "function": "run",
+                            "code_snippet": "stmt.executeQuery(sql)",
+                            "call_chain": ["Unsafe.run", "stmt.executeQuery"],
+                            "evidence": "외부 입력이 SQL 실행 API로 전달됩니다.",
+                            "description": "SQL 삽입",
+                            "recommendation": "PreparedStatement를 사용하세요.",
+                            "safe_example": "PreparedStatement ps = conn.prepareStatement(sql);",
+                            "confidence": "HIGH",
+                            "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
+                        }
+                    ],
+                }
+            }
+
+    class FakeReportGenerator:
+        is_available = True
+
+        def attach_finding_explanations(self, result: dict) -> None:
+            finding = result["analysis_result"]["vulnerabilities"][0]
+            assert finding["guideline_refs"]
+            finding["llm_explanation_status"] = "generated"
+            finding["llm_explanation"] = {
+                "why_vulnerable": "SQL 문자열에 외부 입력이 포함됩니다.",
+                "how_to_fix": "PreparedStatement 바인딩을 사용합니다.",
+                "fix_steps": ["SQL을 ? placeholder로 바꿉니다."],
+                "cited_guideline_ids": [finding["guideline_refs"][0]["id"]],
+                "citations": [],
+                "grounding_notes": None,
+            }
+            finding["llm_explanation_error"] = None
+
+        def generate(self, *, result: dict, target_path: str = "", repository: str = "", instructions: str = "") -> str:
+            assert result["analysis_result"]["vulnerabilities"][0]["llm_explanation_status"] == "generated"
+            return "LLM 리포트 본문"
+
+    settings = get_settings().model_copy(update={"openai_api_key": "test-key", "openai_model": "test-model"})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=FakeAnalyzerService(),  # type: ignore[arg-type]
+        result_store=AnalysisResultStore(),
+        report_generator=FakeReportGenerator(),  # type: ignore[arg-type]
+    )
+
+    response = service.analyze_uploaded_file("Unsafe.java", java_bytes(), user_id=1)
+    finding = response["analysis_result"]["vulnerabilities"][0]
+
+    assert finding["llm_explanation_status"] == "generated"
+    assert finding["llm_explanation"]["why_vulnerable"] == "SQL 문자열에 외부 입력이 포함됩니다."
+    assert finding["llm_explanation"]["how_to_fix"] == "PreparedStatement 바인딩을 사용합니다."
+    assert finding["llm_explanation"]["fix_steps"] == ["SQL을 ? placeholder로 바꿉니다."]
+
+
 def test_analysis_result_attaches_guideline_references_before_storage() -> None:
     class FakeAnalyzerService:
         def analyze(self, target_path: str, repository: str = "") -> dict:
