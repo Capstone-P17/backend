@@ -36,8 +36,17 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
         assert finding["guide_item"]
         assert finding["confidence"] in {"HIGH", "MEDIUM", "LOW"}
         assert finding["confidence_reason"]
-        if finding["type"] in {"SQL_INJECTION", "XSS", "HARDCODED_SECRET", "DANGEROUS_FILE_UPLOAD"}:
-            assert finding["evidence"]
+        assert finding["evidence"]
+
+    evidence_by_type = {
+        finding["type"]: finding["evidence"]
+        for finding in analysis["vulnerabilities"]
+        if finding["type"] not in {"SQL_INJECTION", "XSS", "HARDCODED_SECRET", "DANGEROUS_FILE_UPLOAD"}
+    }
+    assert "정규화(normalize)" in evidence_by_type["PATH_TRAVERSAL"]
+    assert "운영체제 명령 실행" in evidence_by_type["COMMAND_INJECTION"]
+    assert "new Random()" in evidence_by_type["INSECURE_RANDOM"]
+    assert "MessageDigest.getInstance" in evidence_by_type["WEAK_HASH"]
 
 
 def test_vulnerability_schema_requires_enriched_fields() -> None:

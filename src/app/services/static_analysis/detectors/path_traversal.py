@@ -36,6 +36,18 @@ def detect_path_traversal(filepath, tree, vuln_counter):
         for child in node.children:
             collect_tainted_vars(child)
 
+    def build_evidence(tainted_var, sink_desc):
+        source = tainted_vars.get(tainted_var, {})
+        source_line = source.get("line")
+        source_code = source.get("code")
+        source_desc = f"line {source_line}에서 사용자 입력이 `{tainted_var}` 변수에 저장되었습니다"
+        if source_code:
+            source_desc += f": `{source_code}`"
+        return (
+            f"{source_desc}. 이후 `{tainted_var}` 값이 `{sink_desc}` 경로 생성/파일 접근 API에 전달되었습니다. "
+            "정규화(normalize) 후 기준 디렉터리 내부 여부(startsWith)를 확인하는 방어 로직은 탐지되지 않았습니다."
+        )
+
     def report(node, tainted_var, sink_desc):
         vuln_counter[0] += 1
         class_name = find_parent_class(node)
@@ -56,6 +68,7 @@ def detect_path_traversal(filepath, tree, vuln_counter):
                 "code_snippet": node.text.decode().strip(),
                 "call_chain": chain,
                 "description": "",
+                "evidence": build_evidence(tainted_var, sink_desc),
             }
         )
 

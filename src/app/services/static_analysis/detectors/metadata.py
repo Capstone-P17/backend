@@ -136,7 +136,10 @@ def enrich_finding(finding: dict) -> dict:
     enriched.setdefault("guide_category", metadata.guide_category)
     enriched.setdefault("guide_item", metadata.guide_item)
     enriched["description"] = enriched.get("description") or metadata.description
-    enriched.setdefault("evidence", "")
+    enriched["evidence"] = enriched.get("evidence") or (
+        f"{metadata.guide_item} 정적 분석 규칙이 취약 패턴을 탐지했습니다. "
+        "구체적인 입력 흐름, 위험 API, 누락된 방어 로직은 detector별 근거를 통해 보강해야 합니다."
+    )
     enriched.setdefault("recommendation", metadata.recommendation)
     enriched.setdefault("safe_example", metadata.safe_example)
     enriched.setdefault("confidence", metadata.confidence)

@@ -33,6 +33,11 @@ def detect_weak_hash(filepath, tree, vuln_counter):
                             if class_name and method_name:
                                 chain.append(f"{class_name}.{method_name}")
                             chain.append(f'MessageDigest.getInstance("{algo}") → 취약한 해시')
+                            evidence = (
+                                f'`MessageDigest.getInstance("{algo}")` 호출이 확인되었습니다. '
+                                "MD5/SHA-1 계열 해시는 충돌 공격에 취약하여 비밀번호 저장, 서명, 무결성 검증 등 "
+                                "보안 목적의 해시로 사용하기에 부적절합니다."
+                            )
                             vulnerabilities.append(
                                 {
                                     "id": f"VULN-{vuln_counter[0]:03d}",
@@ -45,6 +50,7 @@ def detect_weak_hash(filepath, tree, vuln_counter):
                                     "code_snippet": node.text.decode().strip(),
                                     "call_chain": chain,
                                     "description": "",
+                                    "evidence": evidence,
                                 }
                             )
 

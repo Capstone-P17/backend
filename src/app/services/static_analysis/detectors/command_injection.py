@@ -35,6 +35,18 @@ def detect_command_injection(filepath, tree, vuln_counter):
         for child in node.children:
             collect_tainted_vars(child)
 
+    def build_evidence(tainted_var, sink_desc):
+        source = tainted_vars.get(tainted_var, {})
+        source_line = source.get("line")
+        source_code = source.get("code")
+        source_desc = f"line {source_line}에서 사용자 입력이 `{tainted_var}` 변수에 저장되었습니다"
+        if source_code:
+            source_desc += f": `{source_code}`"
+        return (
+            f"{source_desc}. 이후 `{tainted_var}` 값이 `{sink_desc}` 운영체제 명령 실행 지점에 전달되었습니다. "
+            "명령 allowlist, 고정 명령어 사용, 또는 인자 분리 기반 검증 로직은 탐지되지 않았습니다."
+        )
+
     def report(node, tainted_var, sink_desc):
         vuln_counter[0] += 1
         class_name = find_parent_class(node)
@@ -55,6 +67,7 @@ def detect_command_injection(filepath, tree, vuln_counter):
                 "code_snippet": node.text.decode().strip(),
                 "call_chain": chain,
                 "description": "",
+                "evidence": build_evidence(tainted_var, sink_desc),
             }
         )
 

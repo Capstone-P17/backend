@@ -36,6 +36,11 @@ def detect_insecure_random(filepath, tree, vuln_counter):
                     if class_name and method_name:
                         chain.append(f"{class_name}.{method_name}")
                     chain.append("new Random() → 예측 가능한 난수")
+                    evidence = (
+                        f"보안 관련 변수명 `{var_name}`에 예측 가능한 `new Random()` 생성기가 사용되었습니다. "
+                        "토큰, 세션 ID, 키, nonce 등 보안 값에는 `java.util.Random` 대신 "
+                        "`java.security.SecureRandom`을 사용해야 합니다."
+                    )
                     vulnerabilities.append(
                         {
                             "id": f"VULN-{vuln_counter[0]:03d}",
@@ -48,6 +53,7 @@ def detect_insecure_random(filepath, tree, vuln_counter):
                             "code_snippet": _get_declaration_snippet(node),
                             "call_chain": chain,
                             "description": "",
+                            "evidence": evidence,
                         }
                     )
 
