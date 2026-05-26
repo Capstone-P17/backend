@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.app.services.guidelines.repository import GuidelineRepository
+from src.app.services.static_analysis.detectors.metadata import DETECTOR_METADATA
 
 
 def test_guideline_repository_maps_detector_type_to_reference() -> None:
@@ -37,3 +38,23 @@ def test_guideline_repository_returns_empty_for_unknown_finding() -> None:
     repository = GuidelineRepository.load()
 
     assert repository.find_for_finding({"type": "UNKNOWN"}) == []
+
+
+def test_all_detector_metadata_types_are_mapped_to_official_guideline() -> None:
+    repository = GuidelineRepository.load()
+
+    for detector_type in DETECTOR_METADATA:
+        assert repository.find_by_detector_type(detector_type), detector_type
+
+
+def test_guideline_reference_detector_types_are_known_by_metadata() -> None:
+    repository = GuidelineRepository.load()
+    known_detector_types = set(DETECTOR_METADATA)
+
+    mapped_detector_types = {
+        detector_type
+        for reference in repository.references
+        for detector_type in reference.detector_types
+    }
+
+    assert mapped_detector_types <= known_detector_types

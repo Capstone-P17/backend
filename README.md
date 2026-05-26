@@ -1,5 +1,9 @@
 # backend
 
+## 공식 가이드 매핑
+
+- [공식 보안약점 진단가이드 매핑 테이블](docs/security-guide-mapping.md)
+
 ## 실행 방법
 
 ```bash

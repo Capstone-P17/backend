@@ -55,7 +55,7 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         recommendation="비밀 값은 환경 변수, 시크릿 매니저, 안전한 설정 저장소에서 주입하고 저장소 이력의 노출 여부를 점검하세요.",
         safe_example='String apiKey = System.getenv("API_KEY");',
         confidence="MEDIUM",
-        confidence_reason="하드코딩된 문자열이 민감 호출에 사용되는 흐름은 확인했지만, 실제 비밀값의 유효성이나 운영 환경 노출 범위는 정적 분석만으로 확정할 수 없어 MEDIUM으로 판단했습니다.",
+        confidence_reason="민감 키워드 변수 또는 비밀값 형식 문자열이 소스 코드에 하드코딩되어 저장소 노출 위험이 있으므로 MEDIUM으로 판단했습니다. 실제 민감 호출 사용이 확인되면 개별 finding의 신뢰도를 HIGH로 올립니다.",
     ),
     "PATH_TRAVERSAL": DetectorMetadata(
         cwe="CWE-22",

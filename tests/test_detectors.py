@@ -25,7 +25,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
     result = AnalyzerService(PROJECT_ROOT).analyze("src/analyzer/test_samples")
     analysis = result["analysis_result"]
     assert analysis["files_analyzed"] == 8
-    assert analysis["summary"]["total_vulnerabilities"] == 24
+    assert analysis["summary"]["total_vulnerabilities"] == 26
     assert {finding["type"] for finding in analysis["vulnerabilities"]} == EXPECTED_TYPES
     for finding in analysis["vulnerabilities"]:
         assert finding["description"]
@@ -228,7 +228,7 @@ public class UploadController {
     assert "실행권한 제거: 미확인" in extension_only["evidence"]
 
 
-def test_hardcoded_secret_requires_sensitive_usage_flow(tmp_path: Path) -> None:
+def test_hardcoded_secret_detects_declaration_even_without_sensitive_usage(tmp_path: Path) -> None:
     sample = tmp_path / "SecretFlowController.java"
     sample.write_text(
         """
@@ -239,6 +239,7 @@ public class SecretFlowController {
     private String returnedToken = "return-only-token";
     private String copiedSecret = "copied-secret";
     private String dbPassword = "root1234!";
+    private String injectedPassword = "${DB_PASSWORD}";
 
     public String returnToken() {
         return returnedToken;
@@ -263,16 +264,28 @@ public class SecretFlowController {
         if finding["type"] == "HARDCODED_SECRET"
     ]
 
-    assert len(findings) == 1
-    assert findings[0]["code_snippet"] == 'private String dbPassword = "root1234!";'
-    assert findings[0]["call_chain"] == [
+    assert [finding["code_snippet"] for finding in findings] == [
+        'private String unusedPassword = "not-used-1234";',
+        'private String returnedToken = "return-only-token";',
+        'private String copiedSecret = "copied-secret";',
+        'private String dbPassword = "root1234!";',
+    ]
+
+    db_password = findings[-1]
+    assert db_password["call_chain"] == [
         "SecretFlowController.connect",
         "getConnection",
         "선언 line 7",
-        "사용 line 18",
+        "사용 line 19",
     ]
-    assert "`dbPassword`" in findings[0]["evidence"]
-    assert "getConnection" in findings[0]["evidence"]
+    assert db_password["confidence"] == "HIGH"
+    assert "`dbPassword`" in db_password["evidence"]
+    assert "getConnection" in db_password["evidence"]
+
+    declarations_without_usage = findings[:3]
+    assert all("사용처 확인 안 됨" in finding["call_chain"] for finding in declarations_without_usage)
+    assert all("사용 여부와 무관하게" in finding["evidence"] or "현재 분석 범위에서 민감 호출 사용처는 확인되지 않았습니다" in finding["evidence"] for finding in declarations_without_usage)
+    assert not any("injectedPassword" in finding["code_snippet"] for finding in findings)
 
 
 def test_sql_injection_requires_tainted_sql_execution_flow(tmp_path: Path) -> None:

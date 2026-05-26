@@ -4,7 +4,7 @@ import java.io.*;
 
 public class AuthController {
 
-    // 탐지 제외: 선언만 되어 있고 민감한 호출에 사용되지 않음
+    // 탐지 대상: 사용처가 확인되지 않아도 소스에 하드코딩된 시크릿은 노출 위험
     private String secretKey = "my-secret-key-12345";
 
     // 탐지 대상: DB 연결에 사용되는 하드코딩 비밀번호
