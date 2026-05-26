@@ -95,12 +95,14 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         if not prefix.strip():
             return False
 
-        controls = analyze_controls(prefix, text(sink_node), upload_vars)
+        controls = analyze_controls(prefix, text(sink_node), upload_vars, text(method_node))
         return (
             controls["extension"]["ok"]
             and controls["signature"]["ok"]
             and controls["size"]["ok"]
+            and controls["count"]["ok"]
             and controls["filename"]["ok"]
+            and controls["permission"]["ok"]
             and not controls["path"]["risky"]
         )
 
@@ -180,6 +182,37 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
             )
         )
 
+    def _count_limit_status(prefix, upload_vars):
+        lower = prefix.lower()
+        handles_multi_upload = bool(
+            re.search(r"\bmultipartfile\s*\[\]", lower)
+            or re.search(r"\b(?:list|collection|arraylist)\s*<\s*multipartfile\s*>", lower)
+            or any(var_name.lower().endswith("s") for var_name in upload_vars)
+        )
+        has_count_limit = any(
+            token in lower
+            for token in (
+                "max_file_count",
+                "maxfilecount",
+                "max_files",
+                "maxfiles",
+                "file_count_limit",
+                "filecountlimit",
+                "maxuploadcount",
+                "max_upload_count",
+            )
+        ) or bool(re.search(r"\.(?:length|size)\s*\(\s*\)\s*[<>=!]+", lower))
+
+        if has_count_limit:
+            return {"ok": True, "text": "파일 개수 제한: 확인됨", "chain": "파일 개수 제한 확인"}
+        if not handles_multi_upload and len(upload_vars) == 1:
+            return {
+                "ok": True,
+                "text": "파일 개수 제한: 단일 파일 업로드 파라미터로 제한된 형태입니다.",
+                "chain": "파일 개수 제한: 단일 업로드",
+            }
+        return {"ok": False, "text": "파일 개수 제한: 미확인", "chain": "파일 개수 제한 미확인"}
+
     def _has_regenerated_filename(prefix, sink_text):
         lower = f"{prefix}\n{sink_text}".lower()
         return any(
@@ -201,6 +234,42 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         return any(method.lower() in lower for method in FILENAME_METHODS) or any(
             token in lower for token in ("originalname", "original_name", "filename")
         )
+
+    def _permission_status(method_text):
+        lower = method_text.lower()
+        if any(
+            token in lower
+            for token in (
+                "setexecutable(false",
+                "setposixfilepermissions",
+                "posixfilepermission",
+                "owner_read",
+                "owner_write",
+                "noexec",
+                "chmod",
+                "umask",
+            )
+        ):
+            return {"ok": True, "text": "실행권한 제거: 확인됨", "chain": "실행권한 제거 확인"}
+        return {"ok": False, "text": "실행권한 제거: 미확인", "chain": "실행권한 제거 미확인"}
+
+    def _download_validation_status(method_text):
+        lower = method_text.lower()
+        if "download" not in lower:
+            return {
+                "ok": False,
+                "text": "다운로드 검증: 업로드 저장 코드에서는 확인되지 않았습니다. 다운로드 기능에서 요청 파일명 검증, 권한 확인, 경로조작 문자 차단을 별도로 확인해야 합니다.",
+                "chain": "다운로드 검증 별도 확인 필요",
+            }
+        has_path_check = any(token in lower for token in ("normalize", "startswith", "../", "..\\\\", "canonicalpath"))
+        has_auth_check = any(token in lower for token in ("authorize", "permission", "owner", "principal", "userid", "user_id"))
+        if has_path_check and has_auth_check:
+            return {"ok": True, "text": "다운로드 검증: 요청 파일명 경로 검증과 권한 확인이 함께 확인되었습니다.", "chain": "다운로드 검증 확인"}
+        return {
+            "ok": False,
+            "text": "다운로드 검증: 다운로드 관련 코드가 있으나 요청 파일명 경로 검증 또는 권한 확인이 충분히 확인되지 않았습니다.",
+            "chain": "다운로드 검증 부족",
+        }
 
     def _path_status(sink_text):
         lower = sink_text.lower()
@@ -227,12 +296,13 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
             "chain": "저장 경로: 웹 루트 의심 없음",
         }
 
-    def analyze_controls(prefix, sink_text, upload_vars):
+    def analyze_controls(prefix, sink_text, upload_vars, method_text):
         has_ext_allowlist = _has_extension_allowlist(prefix)
         has_weak_ext = _has_weak_extension_check(prefix)
         has_content_type = _has_content_type_allowlist(prefix)
         has_signature = _has_signature_validation(prefix)
         has_size = _has_size_limit(prefix, upload_vars)
+        count = _count_limit_status(prefix, upload_vars)
         has_regenerated_name = _has_regenerated_filename(prefix, sink_text)
         uses_original_name = _uses_original_filename(prefix, sink_text)
 
@@ -284,20 +354,33 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
             "content_type": content_type,
             "signature": signature,
             "size": size,
+            "count": count,
             "filename": filename,
             "path": path,
+            "permission": _permission_status(method_text),
+            "download": _download_validation_status(method_text),
         }
 
     def build_evidence(upload_vars, sink_desc, controls):
         upload_names = ", ".join(f"`{var_name}`" for var_name in sorted(upload_vars))
         control_lines = "\n".join(
             f"- {controls[key]['text']}"
-            for key in ("extension", "content_type", "signature", "size", "filename", "path")
+            for key in (
+                "extension",
+                "content_type",
+                "signature",
+                "size",
+                "count",
+                "filename",
+                "path",
+                "permission",
+                "download",
+            )
         )
         return (
             f"{upload_names} 업로드 파일이 `{sink_desc}` 저장 API로 전달되었습니다.\n"
-            "행정안전부 소프트웨어 보안약점 진단가이드(2019.6)는 업로드 파일의 타입, 크기, 실행권한 제한과 "
-            "외부에서 식별되지 않는 저장 경로/파일명 사용을 요구합니다.\n"
+            "행정안전부 소프트웨어 보안약점 진단가이드(2019.6)는 업로드 파일의 타입, 크기, 개수, 실행권한 제한과 "
+            "외부에서 식별되지 않는 저장 경로/파일명 사용, 다운로드 요청 파일명 검증을 요구합니다.\n"
             f"{control_lines}"
         )
 
@@ -310,7 +393,17 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         chain.append(f"{', '.join(sorted(upload_vars))} → {sink_desc}")
         chain.extend(
             controls[key]["chain"]
-            for key in ("extension", "content_type", "signature", "size", "filename", "path")
+            for key in (
+                "extension",
+                "content_type",
+                "signature",
+                "size",
+                "count",
+                "filename",
+                "path",
+                "permission",
+                "download",
+            )
             if not controls[key]["ok"]
         )
         return chain
@@ -323,7 +416,7 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         for sink_node, sink_desc in find_upload_sinks(method_node, upload_vars):
             sink_offset = max(0, sink_node.start_byte - method_node.start_byte)
             prefix = method_node.text[:sink_offset].decode()
-            controls = analyze_controls(prefix, text(sink_node), upload_vars)
+            controls = analyze_controls(prefix, text(sink_node), upload_vars, text(method_node))
             if has_sufficient_validation_before(method_node, sink_node, upload_vars):
                 continue
 

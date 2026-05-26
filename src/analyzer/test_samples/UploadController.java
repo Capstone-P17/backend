@@ -33,7 +33,7 @@ public class UploadController {
         file.transferTo(target);
     }
 
-    // 탐지 제외: 크기 제한, 확장자 allowlist, 파일 시그니쳐, 서버 생성 파일명을 함께 사용
+    // 탐지 제외: 크기 제한, 확장자 allowlist, 파일 시그니쳐, 서버 생성 파일명, 실행권한 제거를 함께 사용
     public void safeUpload(MultipartFile file) throws IOException {
         long maxUploadBytes = 1024 * 1024;
         if (file.getSize() > maxUploadBytes) {
@@ -54,5 +54,6 @@ public class UploadController {
         String savedName = UUID.randomUUID().toString() + "." + ext;
         Path target = Paths.get("/var/app/private-files", savedName);
         file.transferTo(target);
+        target.toFile().setExecutable(false, false);
     }
 }

@@ -190,6 +190,7 @@ public class UploadController {
         }
         String savedName = UUID.randomUUID().toString() + "." + ext;
         file.transferTo(Paths.get("/var/app/private-files", savedName));
+        Paths.get("/var/app/private-files", savedName).toFile().setExecutable(false, false);
     }
 }
 """.strip(),
@@ -212,7 +213,10 @@ public class UploadController {
     assert all(finding["guide_item"] == "위험한 형식 파일 업로드" for finding in findings)
     assert all("파일 시그니쳐/Magic byte 검증" in finding["evidence"] for finding in findings)
     assert all("파일 크기 제한" in finding["evidence"] for finding in findings)
+    assert all("파일 개수 제한" in finding["evidence"] for finding in findings)
     assert all("파일명 재생성" in finding["evidence"] for finding in findings)
+    assert all("실행권한 제거" in finding["evidence"] for finding in findings)
+    assert all("다운로드 검증" in finding["evidence"] for finding in findings)
 
     content_type_only = next(finding for finding in findings if finding["function"] == "unsafeContentTypeOnly")
     assert "Content-Type 검증: 확인됨" in content_type_only["evidence"]
@@ -221,6 +225,7 @@ public class UploadController {
     extension_only = next(finding for finding in findings if finding["function"] == "partialExtensionOnly")
     assert "확장자 검증: 허용목록 기반 검증이 확인되었습니다." in extension_only["evidence"]
     assert "파일 시그니쳐/Magic byte 검증: 미확인" in extension_only["evidence"]
+    assert "실행권한 제거: 미확인" in extension_only["evidence"]
 
 
 def test_hardcoded_secret_requires_sensitive_usage_flow(tmp_path: Path) -> None:
