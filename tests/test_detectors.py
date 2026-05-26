@@ -25,7 +25,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
     result = AnalyzerService(PROJECT_ROOT).analyze("src/analyzer/test_samples")
     analysis = result["analysis_result"]
     assert analysis["files_analyzed"] == 8
-    assert analysis["summary"]["total_vulnerabilities"] == 23
+    assert analysis["summary"]["total_vulnerabilities"] == 24
     assert {finding["type"] for finding in analysis["vulnerabilities"]} == EXPECTED_TYPES
     for finding in analysis["vulnerabilities"]:
         assert finding["description"]
@@ -140,6 +140,7 @@ def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) 
     sample.write_text(
         """
 import java.io.*;
+import javax.imageio.ImageIO;
 import java.nio.file.*;
 import java.util.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -154,7 +155,16 @@ public class UploadController {
         Files.copy(file.getInputStream(), Paths.get("uploads", "document.tmp"));
     }
 
-    public void safeUpload(MultipartFile file) throws IOException {
+    public void unsafeContentTypeOnly(MultipartFile file) throws IOException {
+        Set<String> allowedContentTypes = Set.of("image/png", "image/jpeg");
+        String contentType = file.getContentType();
+        if (!allowedContentTypes.contains(contentType)) {
+            throw new SecurityException("Unsupported upload type");
+        }
+        file.transferTo(Paths.get("uploads", "content-type-only.tmp"));
+    }
+
+    public void partialExtensionOnly(MultipartFile file) throws IOException {
         Set<String> allowedExtensions = Set.of("png", "jpg");
         String originalName = file.getOriginalFilename();
         String ext = originalName.substring(originalName.lastIndexOf(".") + 1);
@@ -162,6 +172,24 @@ public class UploadController {
             throw new SecurityException("Unsupported upload type");
         }
         file.transferTo(Paths.get("uploads", "safe." + ext));
+    }
+
+    public void safeUpload(MultipartFile file) throws IOException {
+        long maxUploadBytes = 1024 * 1024;
+        if (file.getSize() > maxUploadBytes) {
+            throw new SecurityException("Upload too large");
+        }
+        Set<String> allowedExtensions = Set.of("png", "jpg");
+        String originalName = file.getOriginalFilename();
+        String ext = originalName.substring(originalName.lastIndexOf(".") + 1).toLowerCase(Locale.ROOT);
+        if (!allowedExtensions.contains(ext)) {
+            throw new SecurityException("Unsupported upload type");
+        }
+        if (ImageIO.read(file.getInputStream()) == null) {
+            throw new SecurityException("Invalid file signature");
+        }
+        String savedName = UUID.randomUUID().toString() + "." + ext;
+        file.transferTo(Paths.get("/var/app/private-files", savedName));
     }
 }
 """.strip(),
@@ -175,9 +203,24 @@ public class UploadController {
         if finding["type"] == "DANGEROUS_FILE_UPLOAD"
     ]
 
-    assert [finding["function"] for finding in findings] == ["unsafeTransfer", "unsafeCopy"]
+    assert [finding["function"] for finding in findings] == [
+        "unsafeTransfer",
+        "unsafeCopy",
+        "unsafeContentTypeOnly",
+        "partialExtensionOnly",
+    ]
     assert all(finding["guide_item"] == "위험한 형식 파일 업로드" for finding in findings)
-    assert all("허용목록 검증" in finding["evidence"] for finding in findings)
+    assert all("파일 시그니쳐/Magic byte 검증" in finding["evidence"] for finding in findings)
+    assert all("파일 크기 제한" in finding["evidence"] for finding in findings)
+    assert all("파일명 재생성" in finding["evidence"] for finding in findings)
+
+    content_type_only = next(finding for finding in findings if finding["function"] == "unsafeContentTypeOnly")
+    assert "Content-Type 검증: 확인됨" in content_type_only["evidence"]
+    assert "단독 방어로는 부족" in content_type_only["evidence"]
+
+    extension_only = next(finding for finding in findings if finding["function"] == "partialExtensionOnly")
+    assert "확장자 검증: 허용목록 기반 검증이 확인되었습니다." in extension_only["evidence"]
+    assert "파일 시그니쳐/Magic byte 검증: 미확인" in extension_only["evidence"]
 
 
 def test_hardcoded_secret_requires_sensitive_usage_flow(tmp_path: Path) -> None:
