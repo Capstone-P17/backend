@@ -1,0 +1,134 @@
+[
+  {
+    "id": "owasp_sqli_bad_00018",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00018.java",
+    "vulnerability_type": "SQL_INJECTION",
+    "cwe": "CWE-89",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Header input is concatenated into an INSERT statement and executed with Statement.executeUpdate()."
+  },
+  {
+    "id": "owasp_sqli_safe_00052",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00052.java",
+    "vulnerability_type": "SQL_INJECTION",
+    "cwe": "CWE-89",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP marks this SQLi case as non-vulnerable; the detector should not report SQL_INJECTION."
+  },
+  {
+    "id": "owasp_hash_bad_00046",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00046.java",
+    "vulnerability_type": "WEAK_HASH",
+    "cwe": "CWE-328",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP marks this weak hash case as vulnerable; the detector should report WEAK_HASH."
+  },
+  {
+    "id": "owasp_hash_safe_00009",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00009.java",
+    "vulnerability_type": "WEAK_HASH",
+    "cwe": "CWE-328",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP marks this weak hash category case as non-vulnerable; the detector should not report WEAK_HASH."
+  },
+  {
+    "id": "owasp_cmdi_bad_00006_known_fn",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00006.java",
+    "vulnerability_type": "COMMAND_INJECTION",
+    "cwe": "CWE-78",
+    "ground_truth_vulnerable": true,
+    "expected_detected": false,
+    "notes": "Known false negative: taint flows through a List and ProcessBuilder.command(argList), which is not tracked yet."
+  },
+  {
+    "id": "owasp_path_bad_00001_known_fn",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00001.java",
+    "vulnerability_type": "PATH_TRAVERSAL",
+    "cwe": "CWE-22",
+    "ground_truth_vulnerable": true,
+    "expected_detected": false,
+    "notes": "Known false negative: cookie value is copied and combined into fileName before FileInputStream; current detector does not follow that multi-step flow."
+  },
+  {
+    "id": "owasp_xss_bad_00013_known_fn",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00013.java",
+    "vulnerability_type": "XSS",
+    "cwe": "CWE-79",
+    "ground_truth_vulnerable": true,
+    "expected_detected": false,
+    "notes": "Known false negative: the OWASP sample uses a flow shape outside the current simple XSS taint tracker."
+  },
+  {
+    "id": "owasp_weakrand_safe_00010",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00010.java",
+    "vulnerability_type": "INSECURE_RANDOM",
+    "cwe": "CWE-330",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP marks this weak random category case as non-vulnerable; the detector should not report INSECURE_RANDOM."
+  },
+  {
+    "id": "juliet_weak_prng_util_01",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE338_Weak_PRNG/CWE338_Weak_PRNG__util_01.java",
+    "vulnerability_type": "INSECURE_RANDOM",
+    "cwe": "CWE-338",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet weak PRNG sample using java.util.Random should be reported as INSECURE_RANDOM."
+  },
+  {
+    "id": "juliet_weak_hash_md2_01",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE328_Reversible_One_Way_Hash/CWE328_Reversible_One_Way_Hash__MD2_01.java",
+    "vulnerability_type": "WEAK_HASH",
+    "cwe": "CWE-328",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet MD2 hash sample should be reported as WEAK_HASH."
+  },
+  {
+    "id": "juliet_xss_getparameter_14_known_fn",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE83_XSS_Attribute/CWE83_XSS_Attribute__Servlet_getParameter_Servlet_14.java",
+    "vulnerability_type": "XSS",
+    "cwe": "CWE-83",
+    "ground_truth_vulnerable": true,
+    "expected_detected": false,
+    "notes": "Known false negative: assignment occurs inside a branch and output occurs in a later branch; current tracker does not retain that flow."
+  },
+  {
+    "id": "juliet_hardcoded_password_driver_01_known_fn",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE259_Hard_Coded_Password/CWE259_Hard_Coded_Password__driverManager_01.java",
+    "vulnerability_type": "HARDCODED_SECRET",
+    "cwe": "CWE-259",
+    "ground_truth_vulnerable": true,
+    "expected_detected": false,
+    "notes": "Known false negative: the literal is assigned to a generic variable named data before use as password; current secret detector focuses on declaration-time literals or value patterns."
+  }
+]
