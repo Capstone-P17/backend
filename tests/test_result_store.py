@@ -72,3 +72,26 @@ def test_database_result_store_persists_across_instances(tmp_path) -> None:
     latest_id, _ = new_store.get_latest(user_id=7)
     assert latest_id == analysis_id
     assert new_store.list_results(user_id=7)[0]["analysis_id"] == analysis_id
+
+
+def assert_update_contract(store) -> None:
+    analysis_id = store.save(sample_result("before", 1), user_id=11)
+    updated = sample_result("after", 5)
+    persisted = store.update(analysis_id, user_id=11, result=updated)
+    assert persisted is not None
+    assert persisted["analysis_result"]["repository"] == "after"
+    assert store.get(analysis_id, user_id=11)["analysis_result"]["summary"]["total_vulnerabilities"] == 5
+    assert store.update(analysis_id, user_id=99, result=sample_result("wrong-owner", 9)) is None
+    assert store.get(analysis_id, user_id=11)["analysis_result"]["repository"] == "after"
+    assert store.update("missing", user_id=11, result=updated) is None
+
+
+def test_in_memory_result_store_update_persists_owner_scoped_results() -> None:
+    assert_update_contract(AnalysisResultStore())
+
+
+def test_database_result_store_update_persists_owner_scoped_results(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'update.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    assert_update_contract(DatabaseAnalysisResultStore(SessionLocal))

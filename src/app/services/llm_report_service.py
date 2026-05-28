@@ -4,10 +4,11 @@ import json
 import re
 from collections import Counter, defaultdict
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 from src.app.core.config import Settings
-from src.app.schemas.analysis import FindingLLMExplanation
+from src.app.schemas.analysis import FindingLLMExplanation, FindingMarkdownReport, FindingReportMetadata
 from src.app.services.llm_grounding import verify_finding_explanation
 
 
@@ -106,6 +107,121 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
             raise
         return self._coerce_content(response.content)
 
+    def generate_finding_markdown_report(
+        self,
+        *,
+        finding: dict[str, Any],
+        analysis: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self.is_available:
+            return self.build_static_finding_markdown_report(
+                finding=finding,
+                analysis=analysis,
+                reason="LLM 리포트 생성을 위한 OPENAI_API_KEY가 설정되어 있지 않습니다.",
+            )
+
+        try:
+            payload = self._build_finding_detail_payload(finding=finding, analysis=analysis)
+            payload_json = self._dump_finding_detail_payload_with_budget(payload)
+            markdown = self._generate_finding_markdown_from_payload(payload_json)
+            markdown = _clean_markdown(markdown)
+            if self.settings.llm_finding_detail_markdown_max_chars > 0:
+                markdown = _truncate(
+                    markdown,
+                    max_chars=self.settings.llm_finding_detail_markdown_max_chars,
+                )
+            title = _finding_title(finding)
+            report = FindingMarkdownReport(
+                status="generated",
+                title=title,
+                summary=_finding_summary(finding),
+                markdown=markdown,
+                proposed_patch=_extract_proposed_patch(markdown),
+                metadata=FindingReportMetadata(
+                    title=title,
+                    severity_label=str(finding.get("severity") or ""),
+                    generated_at=_utc_now(),
+                    model=self.settings.openai_model,
+                    prompt_chars=len(payload_json),
+                    source="llm",
+                ),
+            )
+            return report.model_dump()
+        except ContextBudgetExceededError as exc:
+            return self.build_static_finding_markdown_report(
+                finding=finding,
+                analysis=analysis,
+                reason=str(exc) or "finding 상세 리포트 입력이 context budget을 초과했습니다.",
+            )
+        except Exception as exc:  # noqa: BLE001 - selected finding detail must survive LLM outages
+            return self.build_static_finding_markdown_report(
+                finding=finding,
+                analysis=analysis,
+                reason=str(exc) or "finding 상세 리포트 생성에 실패했습니다.",
+            )
+
+    def _generate_finding_markdown_from_payload(self, finding_json: str) -> str:
+        from langchain_core.prompts import ChatPromptTemplate
+
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    (
+                        "You are a senior application security analyst. Write safe Markdown only. "
+                        "Do not output raw HTML. Do not invent files, lines, runtime validation, "
+                        "CVSS vectors, patches, citations, or exploitability beyond supplied evidence."
+                    ),
+                ),
+                (
+                    "human",
+                    """
+다음 단일 정적 분석 finding JSON만 사용해 한국어 Markdown 보고서를 작성하라.
+코드 식별자와 파일 경로는 원문을 유지한다. 원시 HTML을 쓰지 마라.
+반드시 아래 섹션 순서를 유지하라:
+
+# 요약
+# 검증
+## 검증 기준
+## 검토 보고
+# 근거와 코드 맥락
+## 발견 위치
+## 소스 링크
+## 호출 경로
+## 관련 가이드 인용
+# 공격 경로 분석
+## 판단 근거
+## 악용 가능성
+## 영향
+## 가정
+# 수정 방법
+# 수정 예시
+
+규칙:
+- finding.file, finding.line, finding.function에 없는 위치를 만들지 않는다.
+- 런타임 검증을 수행했다고 말하지 않는다. 미수행이면 명시한다.
+- 패치를 확정할 수 없으면 안전한 패턴 또는 의사코드로 표시한다.
+- code_snippet은 fenced code block으로 유지하고, 수정 예시는 가능하면 ```diff fenced block으로 작성한다.
+- diff에는 제공된 취약 코드/라인과 safe_example/recommendation에서 직접 근거가 있는 변경만 포함한다.
+- 출처는 guideline_refs[].citations에 있는 값만 쓴다.
+- 제공된 static evidence, code_snippet, call_chain, source_link, guideline_refs만 근거로 쓴다.
+- Evidence에는 취약점이 발생한 한 줄만 쓰지 말고, 저장된 code_snippet과 call_chain을 함께 사용해 주변 코드/호출 맥락을 설명한다.
+- source_link가 있으면 Markdown 링크로 제공하고, 없으면 링크를 추정하지 않는다.
+
+finding JSON:
+{finding_json}
+""".strip(),
+                ),
+            ]
+        )
+        try:
+            response = (prompt | self._create_llm()).invoke({"finding_json": finding_json})
+        except Exception as exc:  # noqa: BLE001 - normalize provider context-limit errors
+            if _is_context_limit_error(exc):
+                raise ContextBudgetExceededError(str(exc) or "Finding report context budget exceeded") from exc
+            raise
+        return self._coerce_content(response.content)
+
     def _create_llm(self) -> Any:
         if not self.settings.openai_api_key:
             raise RuntimeError("LLM 리포트 생성을 위한 OPENAI_API_KEY가 설정되어 있지 않습니다.")
@@ -198,6 +314,7 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                 ),
                 "recommendation": _truncate(str(finding.get("recommendation") or ""), max_chars=600),
                 "call_chain": _bounded_list(finding.get("call_chain", []), max_items=8),
+                "call_chain_details": _bounded_list(finding.get("call_chain_details", []), max_items=8),
                 "confidence": finding.get("confidence"),
                 "confidence_reason": _truncate(str(finding.get("confidence_reason") or ""), max_chars=600),
                 "guideline_grounding_status": finding.get("guideline_grounding_status"),
@@ -411,6 +528,68 @@ finding JSON:
             ],
         }
 
+    def _build_finding_detail_payload(
+        self,
+        *,
+        finding: dict[str, Any],
+        analysis: dict[str, Any],
+    ) -> dict[str, Any]:
+        vulnerabilities = [
+            item for item in analysis.get("vulnerabilities", []) if isinstance(item, dict)
+        ]
+        selected_id = _finding_id(finding)
+        same_file_count = sum(
+            1 for item in vulnerabilities if item.get("file") and item.get("file") == finding.get("file")
+        )
+        sibling_counts = Counter(str(item.get("type") or "UNKNOWN") for item in vulnerabilities)
+
+        return {
+            "repository": analysis.get("repository", ""),
+            "language": analysis.get("language", "java"),
+            "analyzed_at": analysis.get("analyzed_at", ""),
+            "summary": {
+                "total_vulnerabilities": len(vulnerabilities),
+                "same_file_count": same_file_count,
+                "by_type": dict(sibling_counts),
+            },
+            "selected_finding_id": selected_id,
+            "finding": self._build_finding_detail_brief(finding),
+        }
+
+    def _build_finding_detail_brief(self, finding: dict[str, Any]) -> dict[str, Any]:
+        guideline_refs = [
+            self._build_guideline_explanation_brief(reference)
+            for reference in finding.get("guideline_refs", [])
+            if isinstance(reference, dict)
+        ]
+        return {
+            "id": finding.get("id"),
+            "type": finding.get("type"),
+            "severity": finding.get("severity"),
+            "cwe": finding.get("cwe"),
+            "file": finding.get("file"),
+            "line": finding.get("line"),
+            "function": finding.get("function"),
+            "description": _truncate(str(finding.get("description") or ""), max_chars=800),
+            "evidence": _truncate(
+                str(finding.get("evidence") or ""),
+                max_chars=self.settings.llm_finding_evidence_max_chars,
+            ),
+            "recommendation": _truncate(str(finding.get("recommendation") or ""), max_chars=800),
+            "safe_example": _truncate(str(finding.get("safe_example") or ""), max_chars=800),
+            "code_snippet": _truncate(str(finding.get("code_snippet") or ""), max_chars=1200),
+            "source_link": finding.get("source_link"),
+            "source_ref": finding.get("source_ref"),
+            "call_chain": _bounded_list(finding.get("call_chain", []), max_items=8),
+            "call_chain_details": _bounded_list(finding.get("call_chain_details", []), max_items=8),
+            "confidence": finding.get("confidence"),
+            "confidence_reason": _truncate(str(finding.get("confidence_reason") or ""), max_chars=800),
+            "guideline_grounding_status": finding.get("guideline_grounding_status"),
+            "analysis_status": finding.get("analysis_status"),
+            "llm_explanation": finding.get("llm_explanation"),
+            "guideline_refs": guideline_refs,
+        }
+
     def _build_guideline_explanation_brief(self, reference: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": reference.get("id"),
@@ -442,6 +621,147 @@ finding JSON:
                 f"Finding explanation payload is {len(dumped)} chars, budget is {budget} chars."
             )
         return dumped
+
+    def _dump_finding_detail_payload_with_budget(self, payload: dict[str, Any]) -> str:
+        dumped = json.dumps(payload, ensure_ascii=False, indent=2)
+        budget = self.settings.llm_finding_detail_payload_max_chars
+        if budget <= 0 or len(dumped) <= budget:
+            return dumped
+        raise ContextBudgetExceededError(
+            f"Finding detail payload is {len(dumped)} chars, budget is {budget} chars."
+        )
+
+    @staticmethod
+    def build_static_finding_markdown_report(
+        *,
+        finding: dict[str, Any],
+        analysis: dict[str, Any],
+        reason: str = "",
+    ) -> dict[str, Any]:
+        title = _finding_title(finding)
+        summary = _finding_summary(finding)
+        file_path = str(finding.get("file") or "unknown file")
+        line = finding.get("line")
+        location = f"{file_path}:{line}" if line is not None else file_path
+        function = str(finding.get("function") or "unknown function")
+        evidence = str(finding.get("evidence") or "정적 분석 evidence가 제공되지 않았습니다.")
+        recommendation = str(finding.get("recommendation") or "수동 검토 후 안전한 수정 방안을 적용하세요.")
+        code_snippet = str(finding.get("code_snippet") or "").strip()
+        safe_example = str(finding.get("safe_example") or "").strip()
+        call_chain = _bounded_list(finding.get("call_chain", []), max_items=8)
+        call_chain_details = [
+            item for item in _bounded_list(finding.get("call_chain_details", []), max_items=8)
+            if isinstance(item, dict)
+        ]
+        citations = _collect_allowed_citations(
+            [reference for reference in finding.get("guideline_refs", []) if isinstance(reference, dict)]
+        )
+        citation_lines = (
+            "\n".join(
+                f"- {citation.get('source')} {citation.get('version')} "
+                f"p.{citation.get('page_start')}-{citation.get('page_end')} "
+                f"({citation.get('section')})"
+                for citation in citations
+            )
+            or "- 등록된 가이드라인 citation 없음"
+        )
+        if call_chain_details:
+            call_chain_lines = "\n".join(
+                (
+                    f"- `{item.get('label')}`"
+                    f" — `{item.get('file') or file_path}{':' + str(item.get('line')) if item.get('line') else ''}`"
+                    f"{' (' + str(item.get('function')) + ')' if item.get('function') else ''}"
+                    f"{' [소스 보기](' + str(item.get('source_link')) + ')' if item.get('source_link') else ''}"
+                )
+                for item in call_chain_details
+            )
+        else:
+            call_chain_lines = "\n".join(f"- `{item}`" for item in call_chain) or "- 제공된 호출 경로 없음"
+        source_link = str(finding.get("source_link") or "").strip()
+        source_link_lines = f"- [GitHub에서 보기]({source_link})" if source_link else "- 제공된 소스 링크 없음"
+        code_block = f"\n```java\n{code_snippet}\n```\n" if code_snippet else "\n코드 스니펫이 제공되지 않았습니다.\n"
+        patch_block = (
+            _build_static_diff_patch(code_snippet=code_snippet, safe_example=safe_example)
+            if safe_example
+            else "구체적인 patch는 원본 파일 전체 문맥이 필요해 자동 생성하지 않았습니다. 위 remediation을 기준으로 수동 수정하세요."
+        )
+        fallback_reason = reason or "LLM 상세 Markdown을 사용할 수 없어 정적 분석 근거로 작성했습니다."
+        markdown = _clean_markdown(
+            f"""
+# 요약
+{summary}
+
+# 검증
+## 검증 기준
+- [x] 정적 분석 finding ID/유형/심각도를 확인했습니다.
+- [x] 제공된 파일/라인/함수 범위만 사용했습니다.
+- [x] 제공된 코드 스니펫과 호출 경로만 사용해 맥락을 정리했습니다.
+- [ ] 런타임 검증 미수행: 이 보고서는 저장된 정적 분석 결과만 사용합니다.
+
+## 검토 보고
+- 취약점 ID: `{_finding_id(finding)}`
+- 유형: `{finding.get("type") or "UNKNOWN"}`
+- 심각도: `{finding.get("severity") or "UNKNOWN"}`
+- 발견 위치: `{location}`
+- 함수: `{function}`
+- 신뢰도: `{finding.get("confidence") or "UNKNOWN"}`
+- Fallback 사유: {fallback_reason}
+
+# 근거와 코드 맥락
+## 발견 위치
+{evidence}
+
+### 탐지 코드 맥락
+저장된 분석 결과에 포함된 코드 맥락입니다.
+{code_block}
+### 소스 링크
+{source_link_lines}
+
+### 호출 경로
+{call_chain_lines}
+
+### 관련 가이드 인용
+{citation_lines}
+
+# 공격 경로 분석
+## 판단 근거
+{finding.get("confidence_reason") or "정적 분석 근거와 신뢰도 사유가 제한적으로 제공되었습니다."}
+
+## 악용 가능성
+정적 분석 결과 기준으로 `{finding.get("severity") or "UNKNOWN"}` 심각도의 검토가 필요합니다. 실제 악용 가능성은 실행 환경과 입력 경로 검증이 필요합니다.
+
+## 영향
+{finding.get("description") or "영향 설명이 제공되지 않았습니다."}
+
+## 가정
+- 새로운 파일, 라인 번호, 런타임 검증 결과를 추정하지 않았습니다.
+- sibling finding 상세는 포함하지 않았습니다. 이 보고서는 선택된 finding 하나만 다룹니다.
+- 저장소: `{analysis.get("repository") or ""}`
+
+# 수정 방법
+{recommendation}
+
+# 수정 예시
+{patch_block}
+""".strip()
+        )
+        report = FindingMarkdownReport(
+            status="static_fallback",
+            title=title,
+            summary=summary,
+            markdown=markdown,
+            proposed_patch=patch_block,
+            metadata=FindingReportMetadata(
+                title=title,
+                severity_label=str(finding.get("severity") or ""),
+                generated_at=_utc_now(),
+                model=None,
+                prompt_chars=None,
+                source="static_fallback",
+            ),
+            error=fallback_reason,
+        )
+        return report.model_dump()
 
     def _dump_payload_with_budget(self, payload: dict[str, Any]) -> str:
         dumped = json.dumps(payload, indent=2, ensure_ascii=False)
@@ -551,6 +871,125 @@ def _parse_json_object(value: str) -> dict[str, Any]:
         raise ValueError("LLM explanation output must be a JSON object.")
     return parsed
 
+
+def _finding_title(finding: dict[str, Any]) -> str:
+    existing = str(finding.get("finding_report_title") or "").strip()
+    if existing:
+        return existing
+    guide_item = str(finding.get("guide_item") or "").strip()
+    file_path = str(finding.get("file") or "").strip()
+    function = str(finding.get("function") or "").strip()
+    location = f"{file_path}:{finding.get('line')}" if finding.get("line") else file_path
+    if guide_item and function:
+        return f"{guide_item} 위험 - {function}"
+    if guide_item and location:
+        return f"{guide_item} 위험 - {location}"
+    raw_type = str(finding.get("type") or "UNKNOWN").replace("_", " ").strip()
+    return " ".join(part.capitalize() for part in raw_type.split()) or "Security finding"
+
+
+def _finding_summary(finding: dict[str, Any]) -> str:
+    existing = str(finding.get("finding_report_summary") or "").strip()
+    if existing:
+        return existing
+    for field in ("description", "evidence", "recommendation"):
+        value = str(finding.get(field) or "").strip()
+        if value:
+            return _truncate(" ".join(value.split()), max_chars=220)
+    return "선택된 취약점에 대한 정적 분석 상세 정보가 제한적으로 제공되었습니다."
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _extract_proposed_patch(markdown: str) -> str | None:
+    match = re.search(r"(?is)^#\s+(?:Proposed patch|수정 예시|패치 제안)\s*(.*?)(?:^#\s+|\Z)", markdown, flags=re.MULTILINE)
+    if not match:
+        return None
+    patch = match.group(1).strip()
+    return patch or None
+
+
+def _build_static_diff_patch(*, code_snippet: str, safe_example: str) -> str:
+    vulnerable_lines = _parse_numbered_snippet_lines(code_snippet)
+    safe_lines = [
+        line.rstrip()
+        for line in safe_example.strip().splitlines()
+        if line.strip()
+    ][:12]
+    if not safe_lines:
+        return "구체적인 patch는 원본 파일 전체 문맥이 필요해 자동 생성하지 않았습니다. 위 remediation을 기준으로 수동 수정하세요."
+
+    active_indexes = [index for index, item in enumerate(vulnerable_lines) if item["active"]]
+    center_index = active_indexes[0] if active_indexes else 0
+    if vulnerable_lines:
+        start_index = max(0, center_index - 1)
+        end_index = min(len(vulnerable_lines), center_index + 2)
+        context_lines = vulnerable_lines[start_index:end_index]
+    else:
+        context_lines = []
+
+    hunk_start = int(context_lines[0]["line"]) if context_lines and context_lines[0]["line"] else 1
+    old_count = max(1, len(context_lines))
+    deleted_count = sum(1 for item in context_lines if item["active"]) or 1
+    new_count = old_count - deleted_count + len(safe_lines)
+    diff_lines = [
+        "```diff",
+        "--- 취약 코드",
+        "+++ 수정 방향",
+        f"@@ -{hunk_start},{old_count} +{hunk_start},{new_count} @@",
+    ]
+
+    if context_lines:
+        inserted_safe_example = False
+        for item in context_lines:
+            prefix = "-" if item["active"] else " "
+            diff_lines.append(f"{prefix} {item['content']}")
+            if item["active"] and not inserted_safe_example:
+                diff_lines.extend(f"+ {line}" for line in safe_lines)
+                inserted_safe_example = True
+        if not inserted_safe_example:
+            diff_lines.append(f"- {context_lines[0]['content']}")
+            diff_lines.extend(f"+ {line}" for line in safe_lines)
+    else:
+        diff_lines.append("- 취약 코드 위치는 위 탐지 코드 맥락을 확인하세요.")
+        diff_lines.extend(f"+ {line}" for line in safe_lines)
+
+    diff_lines.append("```")
+    return "\n".join(diff_lines)
+
+
+def _parse_numbered_snippet_lines(code_snippet: str) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+    for raw_line in code_snippet.splitlines():
+        match = re.match(r"^\s*(>?)\s*(\d+)\s*\|\s?(.*)$", raw_line)
+        if not match:
+            continue
+        parsed.append(
+            {
+                "active": bool(match.group(1)),
+                "line": int(match.group(2)),
+                "content": match.group(3).rstrip(),
+            }
+        )
+    if parsed:
+        return parsed
+
+    return [
+        {"active": index == 0, "line": index + 1, "content": raw_line.rstrip()}
+        for index, raw_line in enumerate(code_snippet.splitlines()[:3])
+        if raw_line.strip()
+    ]
+
+
+def _clean_markdown(markdown: str) -> str:
+    cleaned = re.sub(
+        r"(?is)<\s*/?\s*(script|style|iframe|object|embed|form|input|button|textarea|select|option|meta|link)[^>]*>",
+        "",
+        markdown,
+    )
+    return cleaned.strip()
 
 def _is_context_limit_error(exc: Exception) -> bool:
     message = str(exc).lower()

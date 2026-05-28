@@ -10,6 +10,7 @@ from src.app.services.analysis_service import AnalysisService, InvalidRepository
 from src.app.services.analyzer_service import AnalyzerService
 from src.app.services.llm_report_service import SecurityReportGenerator
 from src.app.services.result_store import AnalysisResultStore
+from src.app.services.static_analysis.detectors.metadata import DETECTOR_METADATA
 
 
 def java_bytes() -> bytes:
@@ -73,6 +74,248 @@ def test_uploaded_repository_rejects_uncompressed_zip_limit() -> None:
 def test_github_repository_returns_analysis_id_envelope_without_network(monkeypatch, analysis_service: AnalysisService) -> None:
     monkeypatch.setattr(analysis_service, "_download_github_archive", lambda owner, repo: (zip_bytes(), "main"))
     assert_analysis_response(analysis_service.analyze_github_repository("https://github.com/acme/repo", user_id=1))
+
+
+
+
+def test_github_repository_attaches_blob_source_links(monkeypatch) -> None:
+    class FakeAnalyzerService:
+        def analyze(self, target_path: str, repository: str = "") -> dict:
+            return {
+                "analysis_result": {
+                    "repository": repository,
+                    "target_path": target_path,
+                    "language": "java",
+                    "files_analyzed": 1,
+                    "analyzed_at": "2026-01-01T00:00:00",
+                    "call_graph": {},
+                    "summary": {
+                        "total_vulnerabilities": 1,
+                        "by_type": {"SQL_INJECTION": 1},
+                        "by_guide_category": {},
+                        "by_severity": {"HIGH": 1},
+                        "score": {"overall": 90, "by_file": {"src/Login.java": 90}},
+                    },
+                    "vulnerabilities": [
+                        {
+                            "id": "VULN-001",
+                            "type": "SQL_INJECTION",
+                            "severity": "HIGH",
+                            "cwe": "CWE-89",
+                            "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
+                            "guide_category": "입력데이터 검증 및 표현",
+                            "guide_item": "SQL 삽입",
+                            "file": "src/Login.java",
+                            "line": 7,
+                            "function": "login",
+                            "code_snippet": "  5 | public void login() {\n> 7 | stmt.executeQuery(sql);\n  8 | }",
+                            "call_chain": ["Login.login", "stmt.executeQuery"],
+                            "call_chain_details": [
+                                {
+                                    "label": "Login.login",
+                                    "kind": "function",
+                                    "file": "src/Login.java",
+                                    "line": 5,
+                                    "function": "login",
+                                },
+                                {
+                                    "label": "stmt.executeQuery",
+                                    "kind": "sink",
+                                    "file": "src/Login.java",
+                                    "line": 7,
+                                    "function": "login",
+                                },
+                            ],
+                            "evidence": "SQL 실행 API 호출",
+                            "description": "SQL 문자열 결합",
+                            "recommendation": "PreparedStatement 사용",
+                            "safe_example": "PreparedStatement ps = conn.prepareStatement(sql);",
+                            "confidence": "HIGH",
+                            "confidence_reason": "외부 입력이 실행 API까지 도달합니다.",
+                        }
+                    ],
+                }
+            }
+
+    settings = get_settings()
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=FakeAnalyzerService(),  # type: ignore[arg-type]
+        result_store=AnalysisResultStore(),
+    )
+    monkeypatch.setattr(service, "_download_github_archive", lambda owner, repo: (zip_bytes(), "main"))
+
+    response = service.analyze_github_repository("https://github.com/acme/repo", user_id=1)
+    analysis = response["analysis_result"]
+    finding = analysis["vulnerabilities"][0]
+
+    assert analysis["repository"] == "acme/repo"
+    assert analysis["source_url"] == "https://github.com/acme/repo"
+    assert analysis["source_ref"] == "main"
+    assert finding["source_link"] == "https://github.com/acme/repo/blob/main/src/Login.java#L5-L8"
+    assert finding["call_chain_details"][0]["source_link"] == "https://github.com/acme/repo/blob/main/src/Login.java#L5"
+    assert finding["call_chain_details"][1]["source_link"] == "https://github.com/acme/repo/blob/main/src/Login.java#L7"
+
+
+def test_analysis_result_generates_contextual_finding_title_and_description() -> None:
+    class FakeAnalyzerService:
+        def analyze(self, target_path: str, repository: str = "") -> dict:
+            return {
+                "analysis_result": {
+                    "repository": repository,
+                    "target_path": target_path,
+                    "language": "java",
+                    "files_analyzed": 1,
+                    "analyzed_at": "2026-01-01T00:00:00",
+                    "call_graph": {},
+                    "summary": {
+                        "total_vulnerabilities": 1,
+                        "by_type": {"SQL_INJECTION": 1},
+                        "by_guide_category": {"입력데이터 검증 및 표현": 1},
+                        "by_severity": {"HIGH": 1},
+                        "score": {"overall": 90, "by_file": {"LoginService.java": 90}},
+                    },
+                    "vulnerabilities": [
+                        {
+                            "id": "VULN-001",
+                            "type": "SQL_INJECTION",
+                            "severity": "HIGH",
+                            "cwe": "CWE-89",
+                            "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
+                            "guide_category": "입력데이터 검증 및 표현",
+                            "guide_item": "SQL 삽입",
+                            "file": "LoginService.java",
+                            "line": 12,
+                            "function": "authenticate",
+                            "code_snippet": (
+                                "  10 | public void authenticate(String username) {\n"
+                                "  11 | String query = \"SELECT * FROM users WHERE username = '\" + username + \"'\";\n"
+                                "> 12 | cursor.executeQuery(query);"
+                            ),
+                            "call_chain": ["LoginService.authenticate", "query", "cursor.executeQuery"],
+                            "evidence": "`username`에서 온 입력이 SQL 문자열 `query`에 결합된 뒤 `cursor.executeQuery`로 실행됩니다.",
+                            "description": DETECTOR_METADATA["SQL_INJECTION"].description,
+                            "recommendation": "PreparedStatement를 사용하세요.",
+                            "safe_example": "PreparedStatement ps = conn.prepareStatement(sql);",
+                            "confidence": "HIGH",
+                            "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
+                        }
+                    ],
+                }
+            }
+
+    result_store = AnalysisResultStore()
+    service = AnalysisService(
+        settings=get_settings(),
+        analyzer_service=FakeAnalyzerService(),  # type: ignore[arg-type]
+        result_store=result_store,
+    )
+
+    response = service.analyze_uploaded_file("LoginService.java", java_bytes(), user_id=1)
+    finding = response["analysis_result"]["vulnerabilities"][0]
+
+    assert finding["finding_report_title"] == "authenticate에서 executeQuery로 이어지는 SQL 삽입"
+    assert finding["description"] != DETECTOR_METADATA["SQL_INJECTION"].description
+    assert "authenticate" in finding["description"]
+    assert "executeQuery" in finding["description"]
+    assert "username에서 온 입력" in finding["finding_report_summary"]
+
+    stored = result_store.get(response["analysis_id"], user_id=1)
+    stored_finding = stored["analysis_result"]["vulnerabilities"][0]
+    assert stored_finding["finding_report_title"] == finding["finding_report_title"]
+    assert stored_finding["description"] == finding["description"]
+
+
+def test_analysis_result_precomputes_all_finding_markdown_reports() -> None:
+    class FakeAnalyzerService:
+        def analyze(self, target_path: str, repository: str = "") -> dict:
+            vulnerabilities = []
+            for index, function in enumerate(("authenticate", "search"), start=1):
+                vulnerabilities.append(
+                    {
+                        "id": f"VULN-{index:03d}",
+                        "type": "SQL_INJECTION",
+                        "severity": "HIGH",
+                        "cwe": "CWE-89",
+                        "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
+                        "guide_category": "입력데이터 검증 및 표현",
+                        "guide_item": "SQL 삽입",
+                        "file": "LoginService.java",
+                        "line": 10 + index,
+                        "function": function,
+                        "code_snippet": f"> {10 + index} | cursor.executeQuery(query);",
+                        "call_chain": [f"LoginService.{function}", "cursor.executeQuery"],
+                        "evidence": f"{function} 입력이 SQL 실행 API로 전달됩니다.",
+                        "description": "",
+                        "recommendation": "PreparedStatement를 사용하세요.",
+                        "safe_example": "PreparedStatement ps = conn.prepareStatement(sql);",
+                        "confidence": "HIGH",
+                        "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
+                    }
+                )
+            return {
+                "analysis_result": {
+                    "repository": repository,
+                    "target_path": target_path,
+                    "language": "java",
+                    "files_analyzed": 1,
+                    "analyzed_at": "2026-01-01T00:00:00",
+                    "call_graph": {},
+                    "summary": {
+                        "total_vulnerabilities": 2,
+                        "by_type": {"SQL_INJECTION": 2},
+                        "by_guide_category": {"입력데이터 검증 및 표현": 2},
+                        "by_severity": {"HIGH": 2},
+                        "score": {"overall": 90, "by_file": {"LoginService.java": 90}},
+                    },
+                    "vulnerabilities": vulnerabilities,
+                }
+            }
+
+    class FakeReportGenerator:
+        is_available = False
+
+        def __init__(self) -> None:
+            self.generated_ids: list[str] = []
+
+        def generate_finding_markdown_report(self, *, finding: dict, analysis: dict) -> dict:
+            self.generated_ids.append(finding["id"])
+            return {
+                "status": "generated",
+                "title": finding["finding_report_title"],
+                "summary": finding["finding_report_summary"],
+                "markdown": f"# 요약\n{finding['id']} 상세 리포트",
+                "proposed_patch": None,
+                "metadata": {
+                    "title": finding["finding_report_title"],
+                    "severity_label": finding["severity"],
+                    "generated_at": "2026-01-01T00:00:00+00:00",
+                    "model": "fake-model",
+                    "prompt_chars": 1,
+                    "source": "llm",
+                },
+                "error": None,
+            }
+
+    report_generator = FakeReportGenerator()
+    result_store = AnalysisResultStore()
+    service = AnalysisService(
+        settings=get_settings(),
+        analyzer_service=FakeAnalyzerService(),  # type: ignore[arg-type]
+        result_store=result_store,
+        report_generator=report_generator,  # type: ignore[arg-type]
+    )
+
+    response = service.analyze_uploaded_file("LoginService.java", java_bytes(), user_id=1)
+    findings = response["analysis_result"]["vulnerabilities"]
+
+    assert report_generator.generated_ids == ["VULN-001", "VULN-002"]
+    assert [finding["finding_report_status"] for finding in findings] == ["generated", "generated"]
+    assert all(finding["finding_report_markdown_preview"] for finding in findings)
+    assert all("finding_report" not in finding for finding in findings)
+
+    detail = service.get_finding_detail(response["analysis_id"], "VULN-002", user_id=1)
+    assert detail["finding"]["finding_report"]["markdown"] == "# 요약\nVULN-002 상세 리포트"
 
 
 def test_analysis_result_includes_generated_llm_report_when_available() -> None:
@@ -330,6 +573,7 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
                         "evidence": "외부 입력이 SQL 실행 API로 전달됩니다.",
                         "recommendation": "PreparedStatement를 사용하세요.",
                         "call_chain": ["AuthController.login", "LoginService.authenticate"],
+                        "call_chain_details": [],
                         "confidence": "HIGH",
                         "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
                         "guideline_refs": [
@@ -374,6 +618,7 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
         "evidence": "외부 입력이 SQL 실행 API로 전달됩니다.",
         "recommendation": "PreparedStatement를 사용하세요.",
         "call_chain": ["AuthController.login", "LoginService.authenticate"],
+        "call_chain_details": [],
         "confidence": "HIGH",
         "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
         "guideline_grounding_status": None,

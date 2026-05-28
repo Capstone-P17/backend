@@ -44,6 +44,12 @@ class AnalysisResultStore:
             return None
         return latest_analysis_id, latest
 
+    def update(self, analysis_id: str, user_id: int, result: dict[str, Any]) -> dict[str, Any] | None:
+        if self._owners.get(analysis_id) != user_id or analysis_id not in self._results:
+            return None
+        self._results[analysis_id] = self._clone(result)
+        return self._clone(self._results[analysis_id])
+
     def list_results(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = max(0, limit)
         matching_ids = [
@@ -127,6 +133,30 @@ class DatabaseAnalysisResultStore:
             if record is None:
                 return None
             return record.analysis_id, deepcopy(record.result_json)
+
+    def update(self, analysis_id: str, user_id: int, result: dict[str, Any]) -> dict[str, Any] | None:
+        analysis = result.get("analysis_result", {}) if isinstance(result, dict) else {}
+        summary = analysis.get("summary", {}) if isinstance(analysis, dict) else {}
+        with self._session_factory() as session:
+            record = session.scalar(
+                select(AnalysisResultModel).where(
+                    AnalysisResultModel.analysis_id == analysis_id,
+                    AnalysisResultModel.user_id == user_id,
+                )
+            )
+            if record is None:
+                return None
+
+            record.repository = analysis.get("repository") or None if isinstance(analysis, dict) else None
+            record.target_path = analysis.get("target_path") if isinstance(analysis, dict) else None
+            record.language = analysis.get("language", "java") if isinstance(analysis, dict) else "java"
+            record.files_analyzed = analysis.get("files_analyzed", 0) if isinstance(analysis, dict) else 0
+            record.total_vulnerabilities = (
+                summary.get("total_vulnerabilities", 0) if isinstance(summary, dict) else 0
+            )
+            record.result_json = deepcopy(result)
+            session.commit()
+            return deepcopy(record.result_json)
 
     def list_results(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = max(0, limit)

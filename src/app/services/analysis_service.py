@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 import httpx
@@ -15,6 +16,7 @@ import httpx
 from src.app.core.config import Settings
 from src.app.services.llm_report_service import ContextBudgetExceededError
 from src.app.services.result_store import AnalysisResultStore
+from src.app.services.static_analysis.detectors.metadata import DETECTOR_METADATA
 
 if TYPE_CHECKING:
     from src.app.services.analyzer_service import AnalyzerService
@@ -61,11 +63,17 @@ class AnalysisResultNotFoundError(LookupError):
     pass
 
 
+class FindingReportNotReadyError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class PreparedAnalysisTarget:
     target_path: str
     display_target_path: str
     repository: str = ""
+    source_url: str = ""
+    source_ref: str = ""
 
 
 class AnalysisService:
@@ -104,6 +112,7 @@ class AnalysisService:
         except Exception as exc:
             raise AnalysisExecutionError("파일 분석 중 오류 발생") from exc
 
+        self._attach_source_metadata(result, prepared_target)
         return self._save_public_result(result, user_id)
 
     @contextmanager
@@ -137,6 +146,7 @@ class AnalysisService:
         except Exception as exc:
             raise AnalysisExecutionError("업로드한 레포지토리 분석 중 오류 발생") from exc
 
+        self._attach_source_metadata(result, prepared_target)
         return self._save_public_result(result, user_id)
 
     @contextmanager
@@ -178,6 +188,7 @@ class AnalysisService:
         except Exception as exc:
             raise AnalysisExecutionError("GitHub 레포지토리 분석 중 오류 발생") from exc
 
+        self._attach_source_metadata(result, prepared_target)
         return self._save_public_result(result, user_id)
 
     @contextmanager
@@ -205,7 +216,9 @@ class AnalysisService:
             yield PreparedAnalysisTarget(
                 target_path=str(analysis_root),
                 display_target_path=f"github.com/{owner}/{repo}",
-                repository=repo,
+                repository=f"{owner}/{repo}",
+                source_url=f"https://github.com/{owner}/{repo}",
+                source_ref=branch,
             )
 
     def _download_github_archive(self, owner: str, repo: str) -> tuple[bytes, str]:
@@ -251,6 +264,42 @@ class AnalysisService:
         if result is None:
             raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
         return self._build_analysis_response(analysis_id, result)
+
+
+    def get_finding_detail(self, analysis_id: str, finding_id: str, user_id: int) -> dict[str, object]:
+        result = self.result_store.get(analysis_id, user_id)
+        if result is None:
+            raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
+
+        analysis = result.get("analysis_result", {}) if isinstance(result, dict) else {}
+        if not isinstance(analysis, dict):
+            raise AnalysisResultNotFoundError("취약점 상세 결과를 찾을 수 없습니다")
+
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            raise AnalysisResultNotFoundError("취약점 상세 결과를 찾을 수 없습니다")
+
+        selected = next(
+            (
+                finding
+                for finding in vulnerabilities
+                if isinstance(finding, dict) and self._finding_identifier(finding) == finding_id
+            ),
+            None,
+        )
+        if selected is None:
+            raise AnalysisResultNotFoundError("취약점 상세 결과를 찾을 수 없습니다")
+
+        report = selected.get("finding_report")
+        if not self._has_full_finding_markdown(report):
+            raise FindingReportNotReadyError("취약점 상세 리포트가 아직 생성되지 않았습니다")
+
+        return {
+            "analysis_id": analysis_id,
+            "repository": analysis.get("repository", "") if isinstance(analysis, dict) else "",
+            "analyzed_at": analysis.get("analyzed_at", "") if isinstance(analysis, dict) else "",
+            "finding": selected,
+        }
 
     def get_file_result(self, analysis_id: str, file_id: str, user_id: int) -> dict[str, object]:
         response = self.get_result(analysis_id, user_id)
@@ -381,17 +430,413 @@ class AnalysisService:
                 return nested_root
         return extract_root
 
+    @staticmethod
+    def _attach_source_metadata(result: dict[str, object], prepared_target: PreparedAnalysisTarget) -> None:
+        if not prepared_target.source_url:
+            return
+        analysis = result.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return
+
+        analysis["source_url"] = prepared_target.source_url
+        analysis["source_ref"] = prepared_target.source_ref
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            return
+
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            finding["source_url"] = prepared_target.source_url
+            finding["source_ref"] = prepared_target.source_ref
+            link = AnalysisService._build_source_link(
+                source_url=prepared_target.source_url,
+                source_ref=prepared_target.source_ref,
+                file_path=str(finding.get("file") or ""),
+                line=finding.get("line"),
+                code_snippet=str(finding.get("code_snippet") or ""),
+            )
+            if link:
+                finding["source_link"] = link
+            call_details = finding.get("call_chain_details", [])
+            if not isinstance(call_details, list):
+                continue
+            for detail in call_details:
+                if not isinstance(detail, dict):
+                    continue
+                detail["source_url"] = prepared_target.source_url
+                detail["source_ref"] = prepared_target.source_ref
+                detail_link = AnalysisService._build_source_link(
+                    source_url=prepared_target.source_url,
+                    source_ref=prepared_target.source_ref,
+                    file_path=str(detail.get("file") or finding.get("file") or ""),
+                    line=detail.get("line"),
+                )
+                if detail_link:
+                    detail["source_link"] = detail_link
+
+    @staticmethod
+    def _build_source_link(
+        *,
+        source_url: str,
+        source_ref: str,
+        file_path: str,
+        line: object,
+        code_snippet: str = "",
+    ) -> str:
+        if not source_url.startswith("https://github.com/") or not source_ref or not file_path:
+            return ""
+        try:
+            line_number = int(line) if line is not None else 0
+        except (TypeError, ValueError):
+            line_number = 0
+        if line_number <= 0:
+            return ""
+
+        start_line, end_line = AnalysisService._snippet_line_range(code_snippet)
+        if start_line <= 0:
+            start_line = line_number
+        if end_line < start_line:
+            end_line = start_line
+
+        encoded_ref = quote(source_ref, safe="")
+        encoded_path = quote(file_path.lstrip("/"), safe="/")
+        if start_line <= line_number <= end_line and start_line != end_line:
+            anchor = f"#L{start_line}-L{end_line}"
+        else:
+            anchor = f"#L{line_number}"
+        return f"{source_url.rstrip('/')}/blob/{encoded_ref}/{encoded_path}{anchor}"
+
+    @staticmethod
+    def _snippet_line_range(code_snippet: str) -> tuple[int, int]:
+        line_numbers: list[int] = []
+        for raw_line in code_snippet.splitlines():
+            match = re.match(r"^\s*>?\s*(\d+)\s*\|", raw_line)
+            if match:
+                line_numbers.append(int(match.group(1)))
+        if not line_numbers:
+            return 0, 0
+        return min(line_numbers), max(line_numbers)
+
     def _save_public_result(self, result: dict[str, object], user_id: int) -> dict[str, object]:
         sanitized_result = self._sanitize_public_result(result)
         self._attach_guideline_references(sanitized_result)
+        self._attach_compact_finding_titles(sanitized_result)
         self._attach_finding_explanations(sanitized_result)
+        self._attach_finding_markdown_reports(sanitized_result)
         self._attach_llm_report(sanitized_result)
         analysis_id = self.result_store.save(sanitized_result, user_id)
         return self._build_analysis_response(analysis_id, sanitized_result)
 
+
+    @staticmethod
+    def _finding_identifier(finding: dict[str, object]) -> str:
+        return str(
+            finding.get("id")
+            or f"{finding.get('type', 'UNKNOWN')}:{finding.get('file', '')}:{finding.get('line', '')}"
+        )
+
+    @staticmethod
+    def _has_full_finding_markdown(report: object) -> bool:
+        return isinstance(report, dict) and bool(str(report.get("markdown") or "").strip())
+
+    def _generate_finding_markdown_report(self, *, finding: dict[str, object], analysis: dict[str, object]) -> dict[str, object]:
+        generate = getattr(self.report_generator, "generate_finding_markdown_report", None)
+        if callable(generate):
+            return generate(finding=deepcopy(finding), analysis=deepcopy(analysis))
+
+        from src.app.services.llm_report_service import SecurityReportGenerator
+
+        return SecurityReportGenerator.build_static_finding_markdown_report(
+            finding=deepcopy(finding),
+            analysis=deepcopy(analysis),
+            reason="Finding 상세 Markdown 생성기가 설정되어 있지 않아 정적 fallback을 사용했습니다.",
+        )
+
+    def _attach_finding_markdown_reports(self, result: dict[str, object]) -> None:
+        analysis = result.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return
+
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            return
+
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            if self._has_full_finding_markdown(finding.get("finding_report")):
+                continue
+            finding["finding_report"] = self._generate_finding_markdown_report(
+                finding=finding,
+                analysis=analysis,
+            )
+
+    @staticmethod
+    def _compact_finding_report(report: object) -> dict[str, object] | None:
+        if not isinstance(report, dict):
+            return None
+        compact: dict[str, object] = {
+            "status": report.get("status", "unavailable"),
+            "title": report.get("title", ""),
+            "summary": report.get("summary", ""),
+            "metadata": report.get("metadata"),
+            "error": report.get("error"),
+        }
+        markdown = str(report.get("markdown") or "").strip()
+        if markdown:
+            compact["markdown_preview"] = markdown[:220].rstrip() + ("…" if len(markdown) > 220 else "")
+        return compact
+
+    @classmethod
+    def _compact_result_for_list_response(cls, result: dict[str, object]) -> dict[str, object]:
+        compact = deepcopy(result)
+        analysis = compact.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return compact
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            return compact
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            compact_report = cls._compact_finding_report(finding.get("finding_report"))
+            if compact_report is not None:
+                finding["finding_report_status"] = compact_report.get("status", "unavailable")
+                finding["finding_report_title"] = compact_report.get("title", "")
+                finding["finding_report_summary"] = compact_report.get("summary", "")
+                finding["finding_report_markdown_preview"] = compact_report.get("markdown_preview", "")
+                finding.pop("finding_report", None)
+        return compact
+
+    @classmethod
+    def _attach_compact_finding_titles(cls, result: dict[str, object]) -> None:
+        analysis = result.get("analysis_result", {})
+        if not isinstance(analysis, dict):
+            return
+
+        vulnerabilities = analysis.get("vulnerabilities", [])
+        if not isinstance(vulnerabilities, list):
+            return
+
+        for finding in vulnerabilities:
+            if not isinstance(finding, dict):
+                continue
+            cls._attach_contextual_finding_description(finding)
+
+            existing_title = str(finding.get("finding_report_title") or "").strip()
+            if not existing_title or cls._is_generic_finding_title(existing_title, finding):
+                finding["finding_report_title"] = cls._build_compact_finding_title(finding)
+
+            existing_summary = str(finding.get("finding_report_summary") or "").strip()
+            if not existing_summary:
+                finding["finding_report_summary"] = cls._build_compact_finding_summary(finding)
+
+    @classmethod
+    def _attach_contextual_finding_description(cls, finding: dict[str, object]) -> None:
+        current = re.sub(r"\s+", " ", str(finding.get("description") or "")).strip()
+        metadata = DETECTOR_METADATA.get(str(finding.get("type") or ""))
+        static_description = re.sub(r"\s+", " ", metadata.description).strip() if metadata else ""
+        if current and current != static_description:
+            return
+
+        finding["description"] = cls._build_contextual_finding_description(finding)
+
+    @classmethod
+    def _build_contextual_finding_description(cls, finding: dict[str, object]) -> str:
+        finding_type = str(finding.get("type") or "").upper()
+        function = cls._compact_identifier(str(finding.get("function") or ""))
+        sink = cls._call_chain_sink(finding)
+        location = cls._compact_location(finding)
+        evidence = cls._clean_inline_text(str(finding.get("evidence") or ""))
+
+        subject = function or location
+        if finding_type == "SQL_INJECTION":
+            if function and sink:
+                return f"{function}에서 구성한 SQL이 {sink} 호출로 실행되어 입력값이 쿼리 구조에 영향을 줄 수 있습니다."
+            return f"{subject}에서 사용자 입력이 SQL 실행 흐름에 포함될 수 있습니다."
+
+        if finding_type == "XSS":
+            if function and sink:
+                return f"{function}에서 받은 입력이 {sink} 출력 흐름으로 이어져 브라우저에서 스크립트가 실행될 수 있습니다."
+            return f"{subject}에서 검증되지 않은 입력이 응답 출력에 포함될 수 있습니다."
+
+        if finding_type == "COMMAND_INJECTION":
+            if function and sink:
+                return f"{function}에서 사용자 입력이 {sink} 명령 실행 흐름으로 전달될 수 있습니다."
+            return f"{subject}에서 외부 입력이 OS 명령 실행에 영향을 줄 수 있습니다."
+
+        if finding_type == "PATH_TRAVERSAL":
+            return f"{subject}에서 외부 입력이 파일 경로 생성이나 파일 접근에 사용될 수 있습니다."
+
+        if finding_type == "HARDCODED_SECRET":
+            secret_name = cls._secret_identifier(finding)
+            if secret_name:
+                return f"{secret_name} 값이 코드에 직접 포함되어 저장소나 배포 산출물을 통해 노출될 수 있습니다."
+            return f"{subject}에 인증정보나 비밀값으로 추정되는 문자열이 코드에 직접 포함되어 있습니다."
+
+        if finding_type == "DANGEROUS_FILE_UPLOAD":
+            return f"{subject}에서 업로드 파일이 충분한 형식·크기·저장경로 검증 없이 저장될 수 있습니다."
+
+        if finding_type == "INSECURE_RANDOM":
+            return f"{subject}에서 보안 값 생성에 예측 가능한 난수 생성기가 사용될 수 있습니다."
+
+        if finding_type == "WEAK_HASH":
+            return f"{subject}에서 보안 목적에 부적합한 약한 해시 알고리즘이 사용될 수 있습니다."
+
+        if evidence:
+            return evidence[:137].rstrip() + ("…" if len(evidence) > 137 else "")
+        return f"{subject}에서 검토가 필요한 취약 코드 후보가 확인되었습니다."
+
+    @staticmethod
+    def _is_generic_finding_title(title: str, finding: dict[str, object]) -> bool:
+        normalized_title = re.sub(r"[^a-z0-9]", "", title.casefold())
+        raw_type = str(finding.get("type") or "")
+        normalized_type = re.sub(r"[^a-z0-9]", "", raw_type.casefold())
+        return bool(normalized_title and normalized_title == normalized_type)
+
+    @classmethod
+    def _build_compact_finding_title(cls, finding: dict[str, object]) -> str:
+        finding_type = str(finding.get("type") or "").upper()
+        guide_item = cls._short_guide_item(finding)
+        function = cls._compact_identifier(str(finding.get("function") or ""))
+        sink = cls._call_chain_sink(finding)
+        location = cls._compact_location(finding)
+
+        if finding_type == "HARDCODED_SECRET":
+            secret_name = cls._secret_identifier(finding)
+            if secret_name:
+                return f"{secret_name} 하드코딩된 인증정보"
+            if function:
+                return f"{function}의 하드코딩된 인증정보"
+
+        if finding_type == "DANGEROUS_FILE_UPLOAD":
+            if function:
+                return f"{function}의 파일 업로드 검증 누락"
+            return f"{location}의 파일 업로드 검증 누락"
+
+        if finding_type == "PATH_TRAVERSAL":
+            if function:
+                return f"{function}의 경로 조작 가능성"
+            return f"{location}의 경로 조작 가능성"
+
+        if finding_type == "COMMAND_INJECTION":
+            if function and sink:
+                return f"{function}에서 {sink}로 이어지는 OS 명령어 삽입"
+            if function:
+                return f"{function}의 OS 명령어 삽입"
+
+        if finding_type == "SQL_INJECTION":
+            if function and sink:
+                return f"{function}에서 {sink}로 이어지는 SQL 삽입"
+            if function:
+                return f"{function}의 SQL 삽입"
+
+        if finding_type == "XSS":
+            if function and sink:
+                return f"{function}에서 {sink}로 이어지는 XSS"
+            if function:
+                return f"{function}의 XSS"
+
+        if finding_type == "INSECURE_RANDOM":
+            if function:
+                return f"{function}의 예측 가능한 난수 사용"
+
+        if finding_type == "WEAK_HASH":
+            if function:
+                return f"{function}의 취약한 해시 알고리즘 사용"
+
+        if function and sink:
+            return f"{function}에서 {sink}로 이어지는 {guide_item}"
+        if function:
+            return f"{function}의 {guide_item}"
+        return f"{location}의 {guide_item}"
+
+    @staticmethod
+    def _build_compact_finding_summary(finding: dict[str, object]) -> str:
+        for field in ("evidence", "description", "recommendation", "confidence_reason"):
+            value = AnalysisService._clean_inline_text(str(finding.get(field) or ""))
+            if value:
+                return value[:137].rstrip() + ("…" if len(value) > 137 else "")
+        return "정적 분석에서 검토가 필요한 취약 코드 후보를 확인했습니다."
+
+    @staticmethod
+    def _clean_inline_text(value: str) -> str:
+        return re.sub(r"\s+", " ", value.replace("`", "")).strip()
+
+    @staticmethod
+    def _short_guide_item(finding: dict[str, object]) -> str:
+        guide_item = str(finding.get("guide_item") or "").strip()
+        finding_type = str(finding.get("type") or "").upper()
+        replacements = {
+            "HARDCODED_SECRET": "하드코드된 인증정보",
+            "PATH_TRAVERSAL": "경로 조작",
+            "COMMAND_INJECTION": "OS 명령어 삽입",
+            "XSS": "XSS",
+            "INSECURE_RANDOM": "예측 가능한 난수 사용",
+            "WEAK_HASH": "취약한 해시 알고리즘 사용",
+            "DANGEROUS_FILE_UPLOAD": "위험한 파일 업로드",
+            "SQL_INJECTION": "SQL 삽입",
+        }
+        if finding_type in replacements:
+            return replacements[finding_type]
+        if guide_item:
+            return guide_item.split("/")[0].strip()
+        return str(finding.get("type") or "취약점").replace("_", " ").title()
+
+    @staticmethod
+    def _compact_location(finding: dict[str, object]) -> str:
+        file_path = str(finding.get("file") or "").strip()
+        line = finding.get("line")
+        if file_path and line:
+            return f"{Path(file_path).name}:{line}"
+        if file_path:
+            return Path(file_path).name
+        return "분석 대상"
+
+    @staticmethod
+    def _compact_identifier(value: str) -> str:
+        value = value.strip()
+        if not value:
+            return ""
+        return value.split(".")[-1]
+
+    @classmethod
+    def _call_chain_sink(cls, finding: dict[str, object]) -> str:
+        call_chain = finding.get("call_chain")
+        if not isinstance(call_chain, list):
+            return ""
+        function = cls._compact_identifier(str(finding.get("function") or ""))
+        for raw_step in reversed(call_chain):
+            step = cls._compact_identifier(str(raw_step or ""))
+            if not step or step == function:
+                continue
+            match = re.search(r"([A-Za-z_$][\w$]*)\s*(?:\(|$)", step)
+            return match.group(1) if match else step
+        return ""
+
+    @staticmethod
+    def _secret_identifier(finding: dict[str, object]) -> str:
+        searchable = "\n".join(
+            str(finding.get(field) or "")
+            for field in ("evidence", "code_snippet", "description")
+        )
+        backtick_match = re.search(r"`([A-Za-z_$][\w$]{2,})`", searchable)
+        if backtick_match:
+            return backtick_match.group(1)
+        assignment_match = re.search(
+            r"\b(?:String|char\[\]|byte\[\]|var)\s+([A-Za-z_$][\w$]*(?:password|passwd|secret|token|key|apiKey)[\w$]*)\s*=",
+            searchable,
+            flags=re.IGNORECASE,
+        )
+        if assignment_match:
+            return assignment_match.group(1)
+        return ""
+
     @staticmethod
     def _build_analysis_response(analysis_id: str, result: dict[str, object]) -> dict[str, object]:
-        analysis = result.get("analysis_result", {}) if isinstance(result, dict) else {}
+        compact_result = AnalysisService._compact_result_for_list_response(result)
+        analysis = compact_result.get("analysis_result", {}) if isinstance(compact_result, dict) else {}
         return {
             "analysis_id": analysis_id,
             "analysis_result": analysis,

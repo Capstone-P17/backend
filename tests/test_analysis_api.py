@@ -78,5 +78,52 @@ def test_existing_protected_routes_still_require_auth(unauthenticated_client) ->
     assert unauthenticated_client.get("/results").status_code == 401
     assert unauthenticated_client.get("/report/some-id").status_code == 401
     assert unauthenticated_client.get("/result/some-id/files/SafeApi.java").status_code == 401
+    assert unauthenticated_client.get("/result/some-id/findings/finding-id").status_code == 401
     assert unauthenticated_client.post("/analyze/repository", json={"url": "https://github.com/acme/repo"}).status_code == 401
     assert unauthenticated_client.get("/agents/profile").status_code == 401
+
+
+def test_finding_detail_endpoint_returns_precomputed_report_and_keeps_result_compact(client) -> None:
+    response = client.post(
+        "/analyze/file",
+        files={"file": ("LoginService.java", vulnerable_java_bytes(), "text/plain")},
+    )
+    assert response.status_code == 200
+    created_payload = response.json()
+    analysis_id = created_payload["analysis_id"]
+    finding = created_payload["analysis_result"]["vulnerabilities"][0]
+    assert finding["finding_report_status"] == "static_fallback"
+    assert finding["finding_report_title"]
+    assert finding["finding_report_summary"]
+    assert finding["finding_report_markdown_preview"]
+    assert finding["finding_report"] is None
+
+    detail = client.get(f"/result/{analysis_id}/findings/{finding['id']}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["analysis_id"] == analysis_id
+    assert payload["finding"]["id"] == finding["id"]
+    assert payload["finding"]["finding_report"]["status"] == "static_fallback"
+    assert "# 요약" in payload["finding"]["finding_report"]["markdown"]
+    assert "# 수정 예시" in payload["finding"]["finding_report"]["markdown"]
+    assert "```diff" in payload["finding"]["finding_report"]["markdown"]
+    assert "+++ 수정 방향" in payload["finding"]["finding_report"]["markdown"]
+
+    compact = client.get(f"/result/{analysis_id}")
+    assert compact.status_code == 200
+    compact_finding = compact.json()["analysis_result"]["vulnerabilities"][0]
+    assert compact_finding["finding_report_status"] == "static_fallback"
+    assert compact_finding["finding_report_title"]
+    assert compact_finding["finding_report_summary"]
+    assert compact_finding["finding_report_markdown_preview"]
+    assert compact_finding["finding_report"] is None
+
+
+def test_finding_detail_endpoint_returns_404_for_missing_finding(client) -> None:
+    response = client.post(
+        "/analyze/file",
+        files={"file": ("LoginService.java", vulnerable_java_bytes(), "text/plain")},
+    )
+    assert response.status_code == 200
+    analysis_id = response.json()["analysis_id"]
+    assert client.get(f"/result/{analysis_id}/findings/not-found").status_code == 404

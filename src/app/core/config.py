@@ -141,6 +141,22 @@ class Settings(BaseModel):
             "AGENT_LLM_FINDING_EXPLANATION_PAYLOAD_MAX_CHARS",
         ),
     )
+    llm_finding_detail_payload_max_chars: int = Field(
+        default=32_000,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_FINDING_DETAIL_PAYLOAD_MAX_CHARS",
+            "AGENT_LLM_FINDING_DETAIL_PAYLOAD_MAX_CHARS",
+        ),
+    )
+    llm_finding_detail_markdown_max_chars: int = Field(
+        default=24_000,
+        ge=0,
+        validation_alias=AliasChoices(
+            "LLM_FINDING_DETAIL_MARKDOWN_MAX_CHARS",
+            "AGENT_LLM_FINDING_DETAIL_MARKDOWN_MAX_CHARS",
+        ),
+    )
     max_upload_bytes: int = Field(
         default=DEFAULT_MAX_UPLOAD_BYTES,
         ge=1,

@@ -56,6 +56,13 @@ class AnalyzerService:
                 vulnerability_path=file_path,
                 target_root=resolved_target,
             )
+            for call_detail in vulnerability.get("call_chain_details", []):
+                if not isinstance(call_detail, dict) or not call_detail.get("file"):
+                    continue
+                call_detail["file"] = self._display_vulnerability_path(
+                    vulnerability_path=Path(call_detail["file"]),
+                    target_root=resolved_target,
+                )
 
         return result
 

@@ -264,12 +264,16 @@ public class SecretFlowController {
         if finding["type"] == "HARDCODED_SECRET"
     ]
 
-    assert [finding["code_snippet"] for finding in findings] == [
+    expected_declarations = [
         'private String unusedPassword = "not-used-1234";',
         'private String returnedToken = "return-only-token";',
         'private String copiedSecret = "copied-secret";',
         'private String dbPassword = "root1234!";',
     ]
+    assert len(findings) == len(expected_declarations)
+    for finding, declaration in zip(findings, expected_declarations, strict=True):
+        assert declaration in finding["code_snippet"]
+        assert "|" in finding["code_snippet"]
 
     db_password = findings[-1]
     assert db_password["call_chain"] == [
@@ -340,5 +344,16 @@ public class SqlFlowController {
         "unsafeConcatMethod",
     ]
     assert all("executeQuery" in finding["call_chain"][-1] for finding in findings)
+    assert all(finding["call_chain_details"] for finding in findings)
+    assert findings[0]["call_chain_details"][0]["kind"] == "function"
+    assert findings[0]["call_chain_details"][0]["file"] == "SqlFlowController.java"
+    assert findings[0]["call_chain_details"][0]["function"] == "unsafeConcat"
+    assert findings[0]["call_chain_details"][-1]["kind"] == "sink"
+    assert findings[0]["call_chain_details"][-1]["line"] > findings[0]["line"]
+    assert "executeQuery" in findings[0]["call_chain_details"][-1]["label"]
     assert all("executeQuery" in finding["evidence"] for finding in findings)
     assert any("String.format" in finding["code_snippet"] for finding in findings)
+    assert all("|" in finding["code_snippet"] for finding in findings)
+    unsafe_concat = findings[0]["code_snippet"]
+    assert "String query" in unsafe_concat
+    assert ">" in unsafe_concat and "executeQuery" in unsafe_concat
