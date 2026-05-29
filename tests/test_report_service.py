@@ -17,7 +17,7 @@ class _FakeAnalysisService:
 def _sample_analysis_result() -> dict[str, object]:
     return {
         "repository": "veracode/verademo",
-        "analyzed_at": "2026-05-29T04:37:00",
+        "analyzed_at": "2026-05-29T04:37:17.424539",
         "files_analyzed": 17,
         "llm_report_status": "generated",
         "llm_model": "gpt-4o",
@@ -67,6 +67,7 @@ def _sample_analysis_result() -> dict[str, object]:
                 "finding_report_title": "execute에서 executeQuery로 이어지는 SQL 삽입",
                 "finding_report_summary": "메서드 파라미터 값이 SQL 문자열에 결합된 뒤 executeQuery로 실행됩니다.",
                 "evidence": "blabberUsername 값이 sqlQuery에 직접 결합된 뒤 sqlStatement.executeQuery로 실행됩니다.",
+                "recommendation": "PreparedStatement와 바인딩 파라미터를 사용하고, SQL 문자열에 사용자 입력을 직접 연결하지 마세요.",
                 "confidence_reason": "사용자 입력이 그대로 SQL 실행 sink로 이어지는 흐름이 확인되었습니다.",
                 "guideline_refs": [
                     {
@@ -98,6 +99,7 @@ def _sample_analysis_result() -> dict[str, object]:
                 "finding_report_title": "execute에서 sqlQuery로 이어지는 SQL 삽입",
                 "finding_report_summary": "같은 파일에서 두 번째 SQL 인젝션 흐름이 확인되었습니다.",
                 "evidence": "추가적인 쿼리 결합 흐름이 execute 내부에 남아 있습니다.",
+                "recommendation": "PreparedStatement 바인딩으로 변경합니다.",
                 "confidence_reason": "동일 메서드 내부에 복수의 sink가 존재합니다.",
                 "guideline_refs": [],
                 "code_snippet": " 45 | sqlStatement.executeQuery(sqlQuery);",
@@ -120,6 +122,7 @@ def _sample_analysis_result() -> dict[str, object]:
                 "finding_report_title": "md5의 취약한 해시 알고리즘 사용",
                 "finding_report_summary": "MD5 해시 함수가 인증/무결성 맥락에서 사용될 수 있습니다.",
                 "evidence": "User.java의 md5 함수가 직접 호출됩니다.",
+                "recommendation": "SHA-256 이상 또는 bcrypt/scrypt/Argon2로 대체합니다.",
                 "confidence_reason": "MD5 문자열이 명시적으로 코드에 포함되어 있습니다.",
                 "guideline_refs": [
                     {
@@ -151,7 +154,7 @@ def test_report_service_builds_pdf_with_latest_analysis_shape() -> None:
     assert pdf_bytes.startswith(b"%PDF")
 
 
-def test_report_service_overview_rows_include_new_distributions() -> None:
+def test_report_service_overview_rows_format_timestamp_and_exclude_removed_fields() -> None:
     service = ReportService(
         settings=get_settings(),
         analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
@@ -160,8 +163,9 @@ def test_report_service_overview_rows_include_new_distributions() -> None:
     rows = service._build_overview_rows(_sample_analysis_result())
 
     assert ["영향 파일 수", "2"] in rows
-    assert ["리포트 상태", "생성됨 · gpt-4o"] in rows
-    assert ["가이드 대분류 분포", "입력데이터 검증 및 표현 13 / 보안기능 3"] in rows
+    assert ["분석 시각", "2026-05-29 04:37:17"] in rows
+    assert not any(label == "보안 점수" for label, _ in rows)
+    assert not any(label == "리포트 상태" for label, _ in rows)
 
 
 def test_report_service_file_summary_rows_aggregate_lines_and_severity() -> None:
@@ -174,15 +178,104 @@ def test_report_service_file_summary_rows_aggregate_lines_and_severity() -> None
 
     assert rows == [
         [
-            "app/src/main/java/com/veracode/verademo/commands/IgnoreCommand.java",
+            "verademo/commands/IgnoreCommand.java",
             "2",
             "37, 45",
             "치명적",
         ],
         [
-            "app/src/main/java/com/veracode/verademo/utils/User.java",
+            "verademo/utils/User.java",
             "1",
             "103",
             "경고",
         ],
+    ]
+
+
+def test_report_service_guideline_summary_limits_output_and_formats_plain_text() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+
+    refs = [
+        {
+            "source_title": "행정안전부 [소프트웨어 보안약점 진단가이드]",
+            "source_version": "2019.6 개정",
+            "category": "입력데이터 검증 및 표현",
+            "item": f"SQL 삽입 {index}",
+            "page_start": 178 + index,
+            "page_end": 191 + index,
+        }
+        for index in range(5)
+    ]
+
+    body = service._build_guideline_summary_text(refs)
+
+    assert "<br/>" not in body
+    assert "추가 근거 외 2건" in body
+    assert "1. " in body
+    assert "2. " in body
+    assert "3. " in body
+
+
+def test_report_service_finding_metadata_uses_report_focused_labels() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+
+    analysis = _sample_analysis_result()
+    finding = analysis["vulnerabilities"][0]
+    rows = service._build_finding_metadata_rows(finding, analysis)
+
+    assert any(
+        label == "파일 / 라인" and "commands/IgnoreCommand.java" in value and "/ 37라인" in value
+        for label, value in rows
+    )
+    assert not any(label == "저장소" for label, _ in rows)
+    assert not any(label == "리포트 상태" for label, _ in rows)
+
+
+def test_report_service_prefers_how_to_fix_and_falls_back_to_recommendation() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+
+    analysis = _sample_analysis_result()
+    finding = analysis["vulnerabilities"][0]
+    finding["llm_explanation"] = {"how_to_fix": "PreparedStatement 바인딩을 적용합니다."}
+
+    assert service._build_fix_method_text(finding) == "PreparedStatement 바인딩을 적용합니다."
+
+    finding.pop("llm_explanation")
+    assert (
+        service._build_fix_method_text(finding)
+        == "PreparedStatement와 바인딩 파라미터를 사용하고, SQL 문자열에 사용자 입력을 직접 연결하지 마세요."
+    )
+
+
+def test_report_service_sorts_findings_like_analysis_ui() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+
+    findings = [
+        {"id": "low-z", "severity": "LOW", "file": "b/File.java", "line": 5, "type": "WEAK_HASH"},
+        {"id": "critical-b", "severity": "CRITICAL", "file": "b/File.java", "line": 40, "type": "SQL_INJECTION"},
+        {"id": "critical-a", "severity": "CRITICAL", "file": "a/File.java", "line": 50, "type": "SQL_INJECTION"},
+        {"id": "critical-a-early", "severity": "CRITICAL", "file": "a/File.java", "line": 10, "type": "SQL_INJECTION"},
+        {"id": "high-a", "severity": "HIGH", "file": "a/File.java", "line": 10, "type": "XSS"},
+    ]
+
+    ordered = service._sort_findings_for_report(findings)
+
+    assert [finding["id"] for finding in ordered] == [
+        "critical-a-early",
+        "critical-a",
+        "critical-b",
+        "high-a",
+        "low-z",
     ]
