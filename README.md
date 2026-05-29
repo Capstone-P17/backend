@@ -1,5 +1,7 @@
 # DoUSECURE Backend
 
+[![Backend CI](https://github.com/Capstone-P17/backend/actions/workflows/backend-ci.yml/badge.svg?branch=main)](https://github.com/Capstone-P17/backend/actions/workflows/backend-ci.yml)
+
 DoUSECURE는 Java 소스코드를 대상으로 보안 취약점을 정적 분석하고, 행정안전부 「소프트웨어 보안약점 진단가이드(2019.6 개정)」 기준의 탐지 근거와 수정 방향을 제공하는 소스코드 취약점 분석 서비스입니다.
 
 ![DoUSECURE home](docs/images/home.png)
