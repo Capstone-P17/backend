@@ -3,6 +3,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# OS / generated analysis output
+.DS_Store
+analysis_result.json
+**/analysis_result.json
+
 # C extensions
 *.so
 
