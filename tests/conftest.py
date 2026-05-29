@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import os
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+os.environ.setdefault("OPENAI_API_KEY", "")
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-with-at-least-32-bytes")
 
 import pytest
 from fastapi.testclient import TestClient
