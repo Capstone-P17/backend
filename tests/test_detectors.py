@@ -292,6 +292,61 @@ public class SecretFlowController {
     assert not any("injectedPassword" in finding["code_snippet"] for finding in findings)
 
 
+def test_weak_hash_detects_unsalted_password_hash_but_ignores_checksum(tmp_path: Path) -> None:
+    sample = tmp_path / "CryptoPolicyService.java"
+    sample.write_text(
+        """
+import java.security.*;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+
+public class CryptoPolicyService {
+    public byte[] unsafeWeakAlgorithm(String input) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("MD5");
+        return digest.digest(input.getBytes());
+    }
+
+    public byte[] unsafePasswordHash(String password) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return digest.digest(password.getBytes());
+    }
+
+    public byte[] safeChecksum(byte[] fileBytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        return digest.digest(fileBytes);
+    }
+
+    public byte[] safePasswordHash(String password, byte[] salt) throws Exception {
+        PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, 120000, 256);
+        SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
+        return factory.generateSecret(spec).getEncoded();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "WEAK_HASH"
+    ]
+
+    assert [finding["function"] for finding in findings] == [
+        "unsafeWeakAlgorithm",
+        "unsafePasswordHash",
+    ]
+    weak_algorithm, password_hash = findings
+    assert "MD5" in weak_algorithm["evidence"]
+    assert weak_algorithm["confidence"] == "HIGH"
+    assert "salt/KDF 없는 비밀번호 해시" in password_hash["call_chain"]
+    assert "PBKDF2" in password_hash["recommendation"]
+    assert password_hash["confidence"] == "MEDIUM"
+    assert not any(finding["function"] == "safeChecksum" for finding in findings)
+    assert not any(finding["function"] == "safePasswordHash" for finding in findings)
+
+
 def test_sql_injection_requires_tainted_sql_execution_flow(tmp_path: Path) -> None:
     sample = tmp_path / "SqlFlowController.java"
     sample.write_text(
