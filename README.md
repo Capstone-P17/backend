@@ -1,22 +1,100 @@
-# backend
+# DoUSECURE Backend
 
-## 공식 가이드 매핑
+DoUSECURE는 Java 소스코드를 대상으로 보안 취약점을 정적 분석하고, 행정안전부 「소프트웨어 보안약점 진단가이드(2019.6 개정)」 기준의 탐지 근거와 수정 방향을 제공하는 소스코드 취약점 분석 서비스입니다.
 
-- [공식 보안약점 진단가이드 매핑 테이블](docs/security-guide-mapping.md)
+![DoUSECURE home](docs/images/home.png)
 
-## 실행 방법
+## 주요 기능
 
-```bash
-uv sync
-uv run uvicorn src.main:app --reload
+- GitHub 저장소, 단일 Java 파일, 압축 파일 업로드 분석
+- `tree-sitter-java` 기반 AST 파싱과 rule-based detector 실행
+- SQL Injection, XSS, Path Traversal, Command Injection, Dangerous File Upload 등 8개 detector 지원
+- 공식 보안약점 진단가이드 항목, CWE, severity, confidence, evidence 매핑
+- OpenAI API 설정 시 LLM 기반 상세 리포트 생성
+- PDF 리포트 다운로드와 분석 결과 조회 API 제공
+
+## 아키텍처
+
+```mermaid
+graph TB
+    User["사용자"] --> Frontend["Next.js Frontend<br/>Vercel"]
+    Frontend -->|"REST API"| Backend["FastAPI Backend"]
+    Frontend -->|"OAuth 시작"| GitHub["GitHub Repository"]
+    Backend -->|"GitHub API"| GitHub
+    Backend --> Analyzer["tree-sitter<br/>정적 분석 엔진"]
+    Backend --> Guide["행정안전부<br/>보안약점 진단가이드 매핑"]
+    Backend --> LLM["OpenAI LLM<br/>상세 리포트 생성"]
+    Backend --> DB[("PostgreSQL / SQLite")]
+    Analyzer --> Detectors["Detector Rules<br/>8개 취약점 유형"]
 ```
 
-## Docker 실행 방법
+## 공식 가이드 기준
+
+현재 구현은 행정안전부 「소프트웨어 보안약점 진단가이드(2019.6 개정)」의 구현단계 보안약점 항목을 기준으로 detector를 매핑합니다.
+
+- [공식 보안약점 진단가이드 매핑 테이블](docs/security-guide-mapping.md)
+- [공식 벤치마크 검증 요약](docs/benchmark-validation.md)
+
+## 빠른 실행
+
+```bash
+cp .env.example .env
+uv sync
+uv run uvicorn src.main:app --host 0.0.0.0 --port 8000
+```
+
+실행 후 확인:
+
+- Backend health: `http://localhost:8000`
+- Swagger UI: `http://localhost:8000/docs`
+- Capabilities: `http://localhost:8000/capabilities`
+
+## 환경 변수
+
+로컬 실행에는 최소한 다음 값을 채워야 합니다.
+
+```env
+JWT_SECRET_KEY="32바이트 이상 랜덤 문자열"
+DATABASE_URL="sqlite:///./app.db"
+ALLOWED_ORIGINS=["http://localhost:3000"]
+```
+
+선택 항목:
+
+- `OPENAI_API_KEY`: LLM 리포트 생성 사용 시 필요
+- `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`: GitHub OAuth 로그인 사용 시 필요
+
+## Docker 실행
 
 ```bash
 docker compose up --build
 ```
 
-- `backend` : `8000` 포트로 실행
-- `db` : `PostgreSQL 16` 기준으로 함께 실행
-- `docker compose`로 실행하면 백엔드 컨테이너 내부의 `DATABASE_URL`이 `db`로 연결되도록 설정
+- `backend`: `8000` 포트로 실행
+- `db`: PostgreSQL 16 기준으로 함께 실행
+- Docker Compose 환경에서는 백엔드 컨테이너가 `db` 서비스로 DB에 연결됩니다.
+
+## API 문서
+
+상세 API 목록은 서버 실행 후 Swagger UI에서 확인하는 것을 권장합니다.
+
+- Swagger UI: `http://localhost:8000/docs`
+- 요약 문서: [docs/api.md](docs/api.md)
+
+## 테스트
+
+```bash
+uv run pytest
+```
+
+테스트 범위에는 detector, 분석 API, 인증, 리포트, 공식 벤치마크 샘플 검증이 포함됩니다.
+
+## 팀 역할
+
+역할은 기능 영역 기준으로 관리합니다.
+
+- 정적 분석 엔진 및 detector 설계
+- 공식 보안약점 진단가이드 매핑과 벤치마크 검증
+- FastAPI 서비스 계층, 인증, 분석 결과 저장
+- PDF 리포트 생성
+- Next.js 프론트엔드와 분석 결과 시각화
