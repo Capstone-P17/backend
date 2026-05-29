@@ -30,6 +30,21 @@ graph TB
     Analyzer --> Detectors["Detector Rules<br/>8개 취약점 유형"]
 ```
 
+## 분석 엔진 구조
+
+실제 서비스에서 사용하는 정적 분석 진입점은 `src/app/services/static_analysis/runner.py`입니다.
+각 취약점 탐지는 `src/app/services/static_analysis/detectors/` 아래의 개별 detector 모듈에서 수행합니다.
+
+```text
+src/app/services/static_analysis/
+  runner.py                 # 파일/디렉터리 분석 진입점
+  parser.py                 # tree-sitter-java 파싱과 AST 유틸리티
+  call_graph.py             # Java 메서드 호출 그래프 생성
+  detectors/                # 취약점별 rule-based detector
+```
+
+`src/analyzer/test_samples/`는 회귀 테스트와 시연용 Java 샘플 위치입니다. 이전에 사용하던 레거시 `src/analyzer/analyzer.py` 분석기는 제거되었고, 서비스 실행 경로에는 포함되지 않습니다.
+
 ## 공식 가이드 기준
 
 현재 구현은 행정안전부 「소프트웨어 보안약점 진단가이드(2019.6 개정)」의 구현단계 보안약점 항목을 기준으로 detector를 매핑합니다.

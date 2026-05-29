@@ -9,6 +9,17 @@
 - 구현단계 보안약점 항목 기준 커버리지: 47개 항목 중 10개 항목 매핑
 - 주의: 매핑은 “가이드 항목과 detector의 대응 관계”를 의미하며, 해당 항목의 모든 변형을 완전 탐지한다는 뜻은 아니다.
 
+## 분석 엔진 위치
+
+서비스에서 사용하는 정적 분석 엔진은 `src/app/services/static_analysis/` 아래에 있다.
+
+- 분석 진입점: `src/app/services/static_analysis/runner.py`
+- AST 파서/공통 유틸리티: `src/app/services/static_analysis/parser.py`
+- 취약점별 탐지기: `src/app/services/static_analysis/detectors/`
+- 테스트/시연용 Java 샘플: `src/analyzer/test_samples/`
+
+`src/analyzer/test_samples/`는 샘플 코드 위치이며 실제 서비스 분석 엔진 경로가 아니다.
+
 ## 현재 지원 Detector
 
 | Detector | CWE | 가이드 분류 | 공식 가이드 항목 | 구현 상태 | 주요 탐지 근거 |
@@ -19,8 +30,8 @@
 | `COMMAND_INJECTION` | CWE-78 | 입력데이터 검증 및 표현 | 운영체제 명령어 삽입 | 구현 | 사용자 입력이 `Runtime.exec` 또는 `ProcessBuilder` 명령 실행 지점에 전달되는 흐름 |
 | `DANGEROUS_FILE_UPLOAD` | CWE-434 | 입력데이터 검증 및 표현 | 위험한 형식 파일 업로드 | 부분 구현 | 업로드 파일이 저장 API에 전달될 때 확장자, Content-Type, 파일 시그니쳐, 크기, 개수, 파일명 재생성, 저장 경로, 실행권한, 다운로드 검증 근거를 확인 |
 | `HARDCODED_SECRET` | CWE-798 | 보안기능 | 하드코드된 비밀번호 / 하드코드된 암호화 키 | 부분 구현 | 민감 키워드 변수 또는 비밀값 형식 문자열이 하드코딩된 경우. 민감 호출 사용처가 확인되면 신뢰도와 근거를 강화 |
-| `INSECURE_RANDOM` | CWE-338 | 보안기능 | 적절하지 않은 난수값 사용 | 구현 | 보안 관련 변수명에 `java.util.Random`이 사용되는 패턴 |
-| `WEAK_HASH` | CWE-328 | 보안기능 | 취약한 암호화 알고리즘 사용 / 솔트 없이 일방향 해시함수 사용 | 부분 구현 | `MessageDigest.getInstance("MD5")`, `"SHA-1"`, `"SHA1"` 등 취약 해시 알고리즘 호출 |
+| `INSECURE_RANDOM` | CWE-338 | 보안기능 | 적절하지 않은 난수값 사용 | 구현 | 토큰, 세션, 키 등 보안 문맥에서 `java.util.Random`이 사용되는 패턴. 비보안 문맥은 제외하거나 낮은 신뢰도로 분류 |
+| `WEAK_HASH` | CWE-328 | 보안기능 | 취약한 암호화 알고리즘 사용 / 솔트 없이 일방향 해시함수 사용 | 부분 구현 | `MessageDigest.getInstance("MD5")`, `"SHA-1"`, `"SHA1"` 등 취약 해시 알고리즘 호출과 비밀번호/토큰 문맥의 salt/KDF 없는 일반 해시 사용 |
 
 ## 구현단계 가이드 항목 매핑
 
@@ -35,7 +46,7 @@
 | 7 | 하드코드된 비밀번호 | 보안기능 | p.327-331 | `HARDCODED_SECRET` | 부분 구현 | 사용 여부와 무관하게 민감 키워드 변수의 문자열 리터럴을 탐지. 설정 파일/주석 등 비 Java 선언 외 영역은 미지원 |
 | 9 | 적절하지 않은 난수값 사용 | 보안기능 | p.336-341 | `INSECURE_RANDOM` | 구현 | 보안 문맥 변수명과 `new Random()` 사용 근거 제공 |
 | 10 | 하드코드된 암호화 키 | 보안기능 | p.342-347 | `HARDCODED_SECRET` | 부분 구현 | 비밀번호와 동일 detector로 처리. 일부 API key/token/private key 형식 패턴을 함께 탐지 |
-| 14 | 솔트 없이 일방향 해시함수 사용 | 보안기능 | p.361-364 | `WEAK_HASH` | 부분 구현 | 약한 해시 호출 탐지 중심. 비밀번호 해시의 salt 사용 여부 분석은 미지원 |
+| 14 | 솔트 없이 일방향 해시함수 사용 | 보안기능 | p.361-364 | `WEAK_HASH` | 부분 구현 | 비밀번호/토큰 문맥에서 `MessageDigest.digest()` 사용 시 salt 또는 KDF 사용 여부를 메서드 범위에서 확인 |
 
 ## 설계단계 파일 업로드/다운로드 기준 반영 현황
 

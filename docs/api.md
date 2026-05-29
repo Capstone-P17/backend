@@ -32,6 +32,11 @@
 | `POST` | `/analyze/repository/jobs` | GitHub 저장소 분석 비동기 작업 생성 |
 | `GET` | `/analyze/jobs/{job_id}` | 저장소 분석 작업 상태 조회 |
 
+### 정적 분석 엔진 경로
+
+분석 API는 `AnalyzerService`를 통해 `src/app/services/static_analysis/runner.py`를 호출한다.
+취약점별 탐지 로직은 `src/app/services/static_analysis/detectors/` 아래에 분리되어 있으며, `src/analyzer/test_samples/`는 실제 엔진이 아니라 테스트와 시연용 Java 샘플 경로다.
+
 ## Results
 
 | Method | Path | 설명 |
