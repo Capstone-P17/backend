@@ -47,6 +47,14 @@ def detect_command_injection(filepath, tree, vuln_counter):
             "명령 allowlist, 고정 명령어 사용, 또는 인자 분리 기반 검증 로직은 탐지되지 않았습니다."
         )
 
+    def build_confidence_reason(tainted_var, sink_desc):
+        source = tainted_vars.get(tainted_var, {})
+        source_line = source.get("line")
+        return (
+            f"line {source_line}의 요청 입력 변수 `{tainted_var}` 값이 운영체제 명령 실행 API `{sink_desc}`까지 전달되는 흐름이 확인되어 HIGH로 판단했습니다. "
+            "정적 분석 범위에서 허용 명령 목록, 고정 명령어, 인자 분리 또는 쉘 메타문자 검증은 확인되지 않았습니다."
+        )
+
     def report(node, tainted_var, sink_desc):
         vuln_counter[0] += 1
         class_name = find_parent_class(node)
@@ -68,6 +76,7 @@ def detect_command_injection(filepath, tree, vuln_counter):
                 "call_chain": chain,
                 "description": "",
                 "evidence": build_evidence(tainted_var, sink_desc),
+                "confidence_reason": build_confidence_reason(tainted_var, sink_desc),
             }
         )
 

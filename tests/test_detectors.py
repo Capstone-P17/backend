@@ -347,6 +347,56 @@ public class CryptoPolicyService {
     assert not any(finding["function"] == "safePasswordHash" for finding in findings)
 
 
+def test_insecure_random_requires_security_context(tmp_path: Path) -> None:
+    sample = tmp_path / "RandomPolicyService.java"
+    sample.write_text(
+        """
+import java.util.Random;
+import java.security.SecureRandom;
+
+public class RandomPolicyService {
+    public String generateToken() {
+        Random random = new Random();
+        return String.valueOf(random.nextLong());
+    }
+
+    public String createSession() {
+        Random sessionRandom = new Random();
+        return "S-" + sessionRandom.nextInt();
+    }
+
+    public int rollDice() {
+        Random random = new Random();
+        return random.nextInt(6) + 1;
+    }
+
+    public int randomPage() {
+        Random pager = new Random();
+        return pager.nextInt(100);
+    }
+
+    public String secureToken() {
+        SecureRandom secureRandom = new SecureRandom();
+        return String.valueOf(secureRandom.nextLong());
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "INSECURE_RANDOM"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["generateToken", "createSession"]
+    assert "메서드명 `generateToken`의 보안값 생성 문맥" in findings[0]["evidence"]
+    assert "변수명 `sessionRandom`의 보안값 생성 문맥" in findings[1]["evidence"]
+    assert all("new Random()" in finding["confidence_reason"] for finding in findings)
+
+
 def test_sql_injection_requires_tainted_sql_execution_flow(tmp_path: Path) -> None:
     sample = tmp_path / "SqlFlowController.java"
     sample.write_text(

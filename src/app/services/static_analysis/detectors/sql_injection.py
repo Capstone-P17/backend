@@ -195,23 +195,22 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                     code=var["code"],
                     call_chain=build_call_chain(node, matched_sql_var),
                     evidence=build_sql_evidence(node, matched_sql_var, var),
+                    confidence_reason=build_sql_confidence_reason(node, matched_sql_var, var),
                 )
                 return
 
             if is_unsafe_sql_expression(arguments):
+                sql_info = {
+                    "source_vars": referenced_tainted_vars(arguments, tainted_vars),
+                    "input_call": text(find_input_call(arguments)) if find_input_call(arguments) else None,
+                }
                 add_finding(
                     node=node,
                     line=node.start_point[0] + 1,
                     code=node.text.decode().strip(),
                     call_chain=build_call_chain(node),
-                    evidence=build_sql_evidence(
-                        node,
-                        None,
-                        {
-                            "source_vars": referenced_tainted_vars(arguments, tainted_vars),
-                            "input_call": text(find_input_call(arguments)) if find_input_call(arguments) else None,
-                        },
-                    ),
+                    evidence=build_sql_evidence(node, None, sql_info),
+                    confidence_reason=build_sql_confidence_reason(node, None, sql_info),
                 )
 
         def build_sql_evidence(node, sql_var, sql_info):
@@ -226,10 +225,32 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                 source = "외부 입력으로 추정되는 값이"
 
             if sql_var:
-                return f"{source} SQL 문자열 `{sql_var}`에 결합된 뒤 `{sink}`로 실행됩니다."
-            return f"{source} SQL 문자열에 직접 결합된 뒤 `{sink}`로 실행됩니다."
+                return (
+                    f"{source} SQL 문자열 `{sql_var}`에 결합된 뒤 `{sink}`로 실행됩니다. "
+                    "PreparedStatement 바인딩 또는 파라미터화된 쿼리 사용은 해당 흐름에서 확인되지 않았습니다."
+                )
+            return (
+                f"{source} SQL 문자열에 직접 결합된 뒤 `{sink}`로 실행됩니다. "
+                "PreparedStatement 바인딩 또는 파라미터화된 쿼리 사용은 해당 흐름에서 확인되지 않았습니다."
+            )
 
-        def add_finding(node, line, code, call_chain, evidence):
+        def build_sql_confidence_reason(node, sql_var, sql_info):
+            sink = build_sink_name(node)
+            source_vars = sql_info.get("source_vars") or []
+            input_call = sql_info.get("input_call")
+            if input_call:
+                source = f"`{input_call}` 입력 출처"
+            elif source_vars:
+                source = f"오염 변수 `{', '.join(source_vars)}`"
+            else:
+                source = "메서드 파라미터 또는 외부 입력으로 추정되는 값"
+            sql_step = f"SQL 변수 `{sql_var}` 생성" if sql_var else "SQL 문자열 직접 생성"
+            return (
+                f"{source}, {sql_step}, `{sink}` 실행 API가 같은 메서드 흐름에서 확인되어 HIGH로 판단했습니다. "
+                "정적 분석 범위에서 PreparedStatement 바인딩으로 분리되는 방어 흐름은 확인되지 않았습니다."
+            )
+
+        def add_finding(node, line, code, call_chain, evidence, confidence_reason):
             severity = _determine_severity(code)
             vuln_counter[0] += 1
             vulnerabilities.append(
@@ -244,6 +265,7 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                     "code_snippet": code,
                     "call_chain": call_chain,
                     "evidence": evidence,
+                    "confidence_reason": confidence_reason,
                     "description": "",
                 }
             )

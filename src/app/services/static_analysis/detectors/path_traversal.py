@@ -48,6 +48,14 @@ def detect_path_traversal(filepath, tree, vuln_counter):
             "정규화(normalize) 후 기준 디렉터리 내부 여부(startsWith)를 확인하는 방어 로직은 탐지되지 않았습니다."
         )
 
+    def build_confidence_reason(tainted_var, sink_desc):
+        source = tainted_vars.get(tainted_var, {})
+        source_line = source.get("line")
+        return (
+            f"line {source_line}의 요청 입력 변수 `{tainted_var}` 값이 파일 경로 API `{sink_desc}`까지 전달되는 흐름이 확인되어 HIGH로 판단했습니다. "
+            "분석 범위에서 `normalize()`, `toRealPath()`, `startsWith(baseDir)` 같은 기준 디렉터리 검증은 확인되지 않았습니다."
+        )
+
     def report(node, tainted_var, sink_desc):
         vuln_counter[0] += 1
         class_name = find_parent_class(node)
@@ -69,6 +77,7 @@ def detect_path_traversal(filepath, tree, vuln_counter):
                 "call_chain": chain,
                 "description": "",
                 "evidence": build_evidence(tainted_var, sink_desc),
+                "confidence_reason": build_confidence_reason(tainted_var, sink_desc),
             }
         )
 

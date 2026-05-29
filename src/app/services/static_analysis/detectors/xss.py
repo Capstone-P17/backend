@@ -181,6 +181,12 @@ def detect_xss(filepath, tree, vuln_counter):
                             user_input_vars,
                             text(find_input_call(arguments)) if find_input_call(arguments) else None,
                         ),
+                        "confidence_reason": build_xss_confidence_reason(
+                            node,
+                            used_var,
+                            user_input_vars,
+                            text(find_input_call(arguments)) if find_input_call(arguments) else None,
+                        ),
                         "description": "",
                     }
                 )
@@ -230,6 +236,20 @@ def detect_xss(filepath, tree, vuln_counter):
                 f"`{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
             )
         return f"외부 입력 값이 HTML 문자열과 결합되어 `{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
+
+    def build_xss_confidence_reason(node, used_var, user_input_vars, direct_input_call):
+        sink = build_output_name(node)
+        if used_var and used_var in user_input_vars:
+            source = user_input_vars[used_var].get("input_call") or user_input_vars[used_var]["code"]
+            source_desc = f"`{source}` 입력 출처와 `{used_var}` 변수 흐름"
+        elif direct_input_call:
+            source_desc = f"`{direct_input_call}` 직접 입력 출처"
+        else:
+            source_desc = "외부 입력으로 추정되는 값"
+        return (
+            f"{source_desc}, HTML 조각과의 문자열 결합, `{sink}` 응답 출력 API가 같은 흐름에서 확인되어 HIGH로 판단했습니다. "
+            "탐지 가능한 HTML 이스케이프 또는 sanitizer 호출은 출력 직전까지 확인되지 않았습니다."
+        )
 
     def build_output_name(node):
         name_node = node.child_by_field_name("name")
