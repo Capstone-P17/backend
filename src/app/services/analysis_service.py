@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import quote
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
@@ -31,6 +31,61 @@ _GITHUB_REPO_URL_RE = re.compile(
 _GITHUB_ARCHIVE_URL = "https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
 _DEFAULT_BRANCHES = ("main", "master")
 _CLONE_TIMEOUT_SECONDS = 60
+ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def _emit_progress(callback: ProgressCallback | None, *, phase: str, message: str, percent: int, **progress: object) -> None:
+    if callback is None:
+        return
+    payload: dict[str, Any] = {
+        "phase": phase,
+        "message": message,
+        "progress": {
+            "percent": max(0, min(100, int(percent))),
+            **progress,
+        },
+    }
+    callback(payload)
+
+
+def _emit_analysis_snapshot(
+    callback: ProgressCallback | None,
+    result: dict[str, object],
+    *,
+    phase: str,
+    message: str,
+    percent: int,
+) -> None:
+    analysis = result.get("analysis_result", {})
+    if not isinstance(analysis, dict):
+        _emit_progress(callback, phase=phase, message=message, percent=percent)
+        return
+    vulnerabilities = analysis.get("vulnerabilities", [])
+    findings_total = len(vulnerabilities) if isinstance(vulnerabilities, list) else 0
+    files_analyzed = _safe_int(analysis.get("files_analyzed"))
+    _emit_progress(
+        callback,
+        phase=phase,
+        message=message,
+        percent=percent,
+        files_analyzed=files_analyzed,
+        files_total=files_analyzed,
+        findings_total=findings_total,
+        finding_reports_total=findings_total,
+    )
+
+
+def _report_progress_percent(completed: int, total: int) -> int:
+    if total <= 0:
+        return 92
+    return 72 + round((max(0, min(completed, total)) / total) * 20)
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 class InvalidJavaFileError(ValueError):
@@ -195,15 +250,39 @@ class AnalysisService:
                 repository=Path(archive_name).stem,
             )
 
-    def analyze_github_repository(self, url: str, user_id: int) -> dict[str, object]:
+    def analyze_github_repository(
+        self,
+        url: str,
+        user_id: int,
+        progress_callback: ProgressCallback | None = None,
+    ) -> dict[str, object]:
         started = time.perf_counter()
         bound = logger.bind(component="analysis.service", user_id=user_id, source="github")
         bound.info("analysis_started url={}", url)
         try:
+            _emit_progress(
+                progress_callback,
+                phase="cloning",
+                message="GitHub 저장소를 내려받고 분석 대상을 준비하고 있습니다.",
+                percent=5,
+            )
             with self.prepare_github_repository(url=url) as prepared_target:
+                _emit_progress(
+                    progress_callback,
+                    phase="indexing",
+                    message="Java 파일과 호출 그래프 후보를 수집하고 있습니다.",
+                    percent=20,
+                )
                 result = self.analyzer_service.analyze(
                     prepared_target.target_path,
                     repository=prepared_target.repository,
+                )
+                _emit_analysis_snapshot(
+                    progress_callback,
+                    result,
+                    phase="static_analysis",
+                    message="정적 분석을 완료하고 발견된 취약점 후보를 정리하고 있습니다.",
+                    percent=50,
                 )
         except (
             InvalidGitHubRepositoryError,
@@ -217,7 +296,14 @@ class AnalysisService:
             raise AnalysisExecutionError("GitHub 레포지토리 분석 중 오류 발생") from exc
 
         self._attach_source_metadata(result, prepared_target)
-        response = self._save_public_result(result, user_id)
+        _emit_analysis_snapshot(
+            progress_callback,
+            result,
+            phase="finding_validation",
+            message="보안 가이드와 탐지 근거를 매핑하고 finding 제목과 설명을 정리하고 있습니다.",
+            percent=58,
+        )
+        response = self._save_public_result(result, user_id, progress_callback=progress_callback)
         bound.info(
             "analysis_finished url={} analysis_id={} duration_ms={:.2f}",
             url,
@@ -599,7 +685,12 @@ class AnalysisService:
             return 0, 0
         return min(line_numbers), max(line_numbers)
 
-    def _save_public_result(self, result: dict[str, object], user_id: int) -> dict[str, object]:
+    def _save_public_result(
+        self,
+        result: dict[str, object],
+        user_id: int,
+        progress_callback: ProgressCallback | None = None,
+    ) -> dict[str, object]:
         started = time.perf_counter()
         logger.bind(component="analysis.pipeline", user_id=user_id).debug("result_sanitize_started")
         sanitized_result = self._sanitize_public_result(result)
@@ -610,16 +701,37 @@ class AnalysisService:
             analysis.get("files_analyzed", 0) if isinstance(analysis, dict) else 0,
             len(vulnerabilities) if isinstance(vulnerabilities, list) else 0,
         )
+        _emit_analysis_snapshot(
+            progress_callback,
+            sanitized_result,
+            phase="finding_validation",
+            message="탐지 결과를 검증 가능한 finding 정보로 정리하고 있습니다.",
+            percent=60,
+        )
         self._attach_guideline_references(sanitized_result)
         logger.bind(component="analysis.pipeline", user_id=user_id).debug("guideline_references_attached")
         self._attach_compact_finding_titles(sanitized_result)
         logger.bind(component="analysis.pipeline", user_id=user_id).debug("compact_finding_titles_attached")
         self._attach_finding_explanations(sanitized_result)
         logger.bind(component="analysis.pipeline", user_id=user_id).debug("finding_explanations_attached")
-        self._attach_finding_markdown_reports(sanitized_result)
+        self._attach_finding_markdown_reports(sanitized_result, progress_callback=progress_callback)
         logger.bind(component="analysis.pipeline", user_id=user_id).debug("finding_markdown_reports_attached")
+        _emit_analysis_snapshot(
+            progress_callback,
+            sanitized_result,
+            phase="summary_generation",
+            message="전체 요약 리포트를 생성하고 저장 준비를 하고 있습니다.",
+            percent=94,
+        )
         self._attach_llm_report(sanitized_result)
         logger.bind(component="analysis.pipeline", user_id=user_id).debug("llm_summary_report_attached")
+        _emit_analysis_snapshot(
+            progress_callback,
+            sanitized_result,
+            phase="saving",
+            message="분석 결과를 저장하고 있습니다.",
+            percent=98,
+        )
         analysis_id = self.result_store.save(sanitized_result, user_id)
         logger.bind(component="analysis.pipeline", user_id=user_id, analysis_id=analysis_id).info(
             "result_saved analysis_id={} duration_ms={:.2f}",
@@ -653,7 +765,11 @@ class AnalysisService:
             reason="Finding 상세 Markdown 생성기가 설정되어 있지 않아 정적 fallback을 사용했습니다.",
         )
 
-    def _attach_finding_markdown_reports(self, result: dict[str, object]) -> None:
+    def _attach_finding_markdown_reports(
+        self,
+        result: dict[str, object],
+        progress_callback: ProgressCallback | None = None,
+    ) -> None:
         analysis = result.get("analysis_result", {})
         if not isinstance(analysis, dict):
             return
@@ -661,6 +777,19 @@ class AnalysisService:
         vulnerabilities = analysis.get("vulnerabilities", [])
         if not isinstance(vulnerabilities, list):
             return
+        total = len([finding for finding in vulnerabilities if isinstance(finding, dict)])
+        completed = 0
+        _emit_progress(
+            progress_callback,
+            phase="report_generation",
+            message=f"finding별 상세 리포트를 생성하고 있습니다. (0/{total})",
+            percent=72,
+            finding_reports_completed=0,
+            finding_reports_total=total,
+            findings_total=total,
+            files_analyzed=_safe_int(analysis.get("files_analyzed")),
+            files_total=_safe_int(analysis.get("files_analyzed")),
+        )
 
         for finding in vulnerabilities:
             if not isinstance(finding, dict):
@@ -669,6 +798,18 @@ class AnalysisService:
                 logger.bind(component="analysis.finding_report", finding_id=self._finding_identifier(finding)).debug(
                     "finding_report_already_present finding_id={}",
                     self._finding_identifier(finding),
+                )
+                completed += 1
+                _emit_progress(
+                    progress_callback,
+                    phase="report_generation",
+                    message=f"finding별 상세 리포트를 생성하고 있습니다. ({completed}/{total})",
+                    percent=_report_progress_percent(completed, total),
+                    finding_reports_completed=completed,
+                    finding_reports_total=total,
+                    findings_total=total,
+                    files_analyzed=_safe_int(analysis.get("files_analyzed")),
+                    files_total=_safe_int(analysis.get("files_analyzed")),
                 )
                 continue
             finding_id = self._finding_identifier(finding)
@@ -683,6 +824,7 @@ class AnalysisService:
                 finding=finding,
                 analysis=analysis,
             )
+            completed += 1
             report = finding.get("finding_report")
             report_status = report.get("status", "unknown") if isinstance(report, dict) else "unknown"
             logger.bind(component="analysis.finding_report", finding_id=finding_id).info(
@@ -690,6 +832,17 @@ class AnalysisService:
                 finding_id,
                 report_status,
                 (time.perf_counter() - report_started) * 1000,
+            )
+            _emit_progress(
+                progress_callback,
+                phase="report_generation",
+                message=f"finding별 상세 리포트를 생성하고 있습니다. ({completed}/{total})",
+                percent=_report_progress_percent(completed, total),
+                finding_reports_completed=completed,
+                finding_reports_total=total,
+                findings_total=total,
+                files_analyzed=_safe_int(analysis.get("files_analyzed")),
+                files_total=_safe_int(analysis.get("files_analyzed")),
             )
 
     @staticmethod

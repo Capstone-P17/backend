@@ -23,7 +23,23 @@ def fake_analysis_response() -> dict:
 
 
 def test_repository_job_success_path(client, analysis_service) -> None:
-    analysis_service.analyze_github_repository = lambda url, user_id: fake_analysis_response()  # type: ignore[method-assign]
+    def analyze(url: str, user_id: int, progress_callback=None) -> dict:  # noqa: ANN001
+        if progress_callback:
+            progress_callback(
+                {
+                    "phase": "report_generation",
+                    "message": "finding별 상세 리포트를 생성하고 있습니다. (1/2)",
+                    "progress": {
+                        "percent": 82,
+                        "findings_total": 2,
+                        "finding_reports_completed": 1,
+                        "finding_reports_total": 2,
+                    },
+                }
+            )
+        return fake_analysis_response()
+
+    analysis_service.analyze_github_repository = analyze  # type: ignore[method-assign]
     response = client.post("/analyze/repository/jobs", json={"url": "https://github.com/acme/repo"})
     assert response.status_code == 202
     payload = response.json()
@@ -33,11 +49,15 @@ def test_repository_job_success_path(client, analysis_service) -> None:
     assert status_response.status_code == 200
     status_payload = status_response.json()
     assert status_payload["status"] == "succeeded"
+    assert status_payload["phase"] == "succeeded"
+    assert status_payload["message"] == "분석과 finding별 리포트 생성이 완료되었습니다."
+    assert status_payload["progress"]["percent"] == 100
+    assert status_payload["progress"]["finding_reports_total"] == 2
     assert status_payload["analysis_id"] == "analysis-123"
 
 
 def test_repository_job_failure_path(client, analysis_service) -> None:
-    def fail(url: str, user_id: int) -> dict:
+    def fail(url: str, user_id: int, progress_callback=None) -> dict:  # noqa: ANN001
         raise RuntimeError("boom")
 
     analysis_service.analyze_github_repository = fail  # type: ignore[method-assign]
@@ -48,6 +68,8 @@ def test_repository_job_failure_path(client, analysis_service) -> None:
     status_response = client.get(f"/analyze/jobs/{job_id}")
     assert status_response.status_code == 200
     assert status_response.json()["status"] == "failed"
+    assert status_response.json()["phase"] == "failed"
+    assert status_response.json()["message"] == "분석 작업이 실패했습니다."
     assert status_response.json()["error"] == "boom"
 
 

@@ -19,6 +19,16 @@ class AnalysisJobStore:
         job = {
             "job_id": str(uuid4()),
             "status": "queued",
+            "phase": "queued",
+            "message": "분석 작업이 대기열에 등록되었습니다.",
+            "progress": {
+                "percent": 0,
+                "files_analyzed": 0,
+                "files_total": 0,
+                "findings_total": 0,
+                "finding_reports_completed": 0,
+                "finding_reports_total": 0,
+            },
             "analysis_id": None,
             "error": None,
             "created_at": now,
@@ -40,11 +50,24 @@ class AnalysisJobStore:
         status: JobStatus,
         analysis_id: str | None = None,
         error: str | None = None,
+        phase: str | None = None,
+        message: str | None = None,
+        progress: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         job = self._jobs.get(job_id)
         if job is None:
             return None
         job["status"] = status
+        if phase is not None:
+            job["phase"] = phase
+        if message is not None:
+            job["message"] = message
+        if progress is not None:
+            current_progress = job.get("progress")
+            if not isinstance(current_progress, dict):
+                current_progress = {}
+            current_progress.update(progress)
+            job["progress"] = current_progress
         job["analysis_id"] = analysis_id
         job["error"] = error
         job["updated_at"] = self._now()

@@ -44,20 +44,50 @@ def _run_repository_analysis_job(
         "repository_analysis_job_started url={}",
         url,
     )
-    job_store.update(job_id, status="running")
+    job_store.update(
+        job_id,
+        status="running",
+        phase="cloning",
+        message="GitHub 저장소를 내려받고 분석 준비를 시작했습니다.",
+        progress={"percent": 3},
+    )
+
+    def update_progress(event: dict[str, Any]) -> None:
+        progress = event.get("progress")
+        job_store.update(
+            job_id,
+            status="running",
+            phase=str(event.get("phase") or "running"),
+            message=str(event.get("message") or "분석 작업을 진행 중입니다."),
+            progress=progress if isinstance(progress, dict) else None,
+        )
+
     try:
-        response = service.analyze_github_repository(url=url, user_id=user_id)
+        response = service.analyze_github_repository(
+            url=url,
+            user_id=user_id,
+            progress_callback=update_progress,
+        )
         job_store.update(
             job_id,
             status="succeeded",
+            phase="succeeded",
             analysis_id=str(response["analysis_id"]),
+            message="분석과 finding별 리포트 생성이 완료되었습니다.",
+            progress={"percent": 100},
         )
         logger.bind(component="analysis.job", job_id=job_id, user_id=user_id).info(
             "repository_analysis_job_succeeded analysis_id={}",
             response["analysis_id"],
         )
     except Exception as exc:  # noqa: BLE001 - background job must capture user-facing failure
-        job_store.update(job_id, status="failed", error=str(exc) or "레포지토리 분석 작업에 실패했습니다")
+        job_store.update(
+            job_id,
+            status="failed",
+            phase="failed",
+            error=str(exc) or "레포지토리 분석 작업에 실패했습니다",
+            message="분석 작업이 실패했습니다.",
+        )
         logger.bind(component="analysis.job", job_id=job_id, user_id=user_id).exception(
             "repository_analysis_job_failed error={}",
             str(exc) or type(exc).__name__,
