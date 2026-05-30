@@ -5,7 +5,11 @@ import json
 from src.app.core.config import get_settings
 from src.app.services.analysis_service import AnalysisService
 from src.app.services.guidelines.repository import GuidelineRepository
-from src.app.services.llm_report_service import ContextBudgetExceededError, SecurityReportGenerator
+from src.app.services.llm_report_service import (
+    ContextBudgetExceededError,
+    SecurityReportGenerator,
+    _ensure_remediation_sections,
+)
 from src.app.services.result_store import AnalysisResultStore
 
 
@@ -167,6 +171,19 @@ def test_finding_detail_payload_compacts_before_budget_failure() -> None:
 
     assert len(dumped) <= settings.llm_finding_detail_payload_max_chars
     assert "budget_compaction" in dumped
+
+
+def test_generated_finding_markdown_is_backfilled_with_static_remediation() -> None:
+    selected = finding(2)
+    selected["safe_example"] = 'PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");'
+    selected["code_snippet"] = ' 10 | String sql = "SELECT * FROM users WHERE id = " + userId;\n> 11 | stmt.executeQuery(sql);'
+
+    markdown = _ensure_remediation_sections("# 요약\nLLM이 보수적으로 요약만 작성했습니다.", selected)
+
+    assert "# 수정 방법" in markdown
+    assert "PreparedStatement를 사용하세요." in markdown
+    assert "# 수정 예시" in markdown
+    assert "PreparedStatement ps = conn.prepareStatement" in markdown
 
 
 def test_finding_explanation_input_uses_compact_guideline_brief_limits() -> None:

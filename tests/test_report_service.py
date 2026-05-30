@@ -18,6 +18,17 @@ class _FakeAnalysisService:
         return {"analysis_result": self.analysis_result}
 
 
+class _FakeReportSourceAnalysisService(_FakeAnalysisService):
+    def __init__(self, compact_result: dict[str, object], report_result: dict[str, object]) -> None:
+        super().__init__(compact_result)
+        self.report_result = report_result
+
+    def get_report_result(self, analysis_id: str, user_id: int) -> dict[str, object]:
+        assert analysis_id == "analysis-1234"
+        assert user_id == 1
+        return {"analysis_result": self.report_result}
+
+
 def _sample_analysis_result() -> dict[str, object]:
     return {
         "repository": "veracode/verademo",
@@ -268,6 +279,7 @@ def test_report_service_renders_stored_finding_markdown_before_static_fallback_s
     analysis = deepcopy(_sample_analysis_result())
     finding = analysis["vulnerabilities"][0]
     finding["evidence"] = "STATIC_ONLY_EVIDENCE_SHOULD_NOT_RENDER"
+    finding["safe_example"] = "PreparedStatement ps = conn.prepareStatement(sql);"
     finding["finding_report"] = {
         "status": "generated",
         "markdown": (
@@ -290,8 +302,45 @@ def test_report_service_renders_stored_finding_markdown_before_static_fallback_s
         if hasattr(flowable, "getPlainText")
     )
     assert "상세 Markdown 보고서" in paragraph_text
+    assert "우선 수정 권고" in paragraph_text
+    assert "PreparedStatement와 바인딩 파라미터를 사용하고" in paragraph_text
     assert "생성된 finding markdown 본문입니다." in paragraph_text
     assert "STATIC_ONLY_EVIDENCE_SHOULD_NOT_RENDER" not in paragraph_text
+
+
+def test_report_service_code_block_uses_korean_capable_font() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+
+    table = service._build_code_block('// 한글 주석: new FileReader(userInput)')
+    code_flowable = table._cellvalues[0][0]  # noqa: SLF001 - inspect ReportLab flowable for regression coverage
+
+    assert code_flowable.style.fontName == "HYGothic-Medium"
+
+
+def test_report_service_uses_full_report_source_not_compact_result() -> None:
+    compact = deepcopy(_sample_analysis_result())
+    compact["vulnerabilities"][0].pop("finding_report", None)
+    full = deepcopy(_sample_analysis_result())
+    full["vulnerabilities"][0]["finding_report"] = {
+        "status": "generated",
+        "markdown": "# 요약\n프론트 상세 페이지와 동일한 전체 Markdown입니다.\n# 수정 방법\nPreparedStatement를 적용합니다.",
+    }
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeReportSourceAnalysisService(compact, full),  # type: ignore[arg-type]
+    )
+
+    story = service._build_story(service._get_pdf_source_result("analysis-1234", 1)["analysis_result"])
+    paragraph_text = "\n".join(
+        flowable.getPlainText()
+        for flowable in story
+        if hasattr(flowable, "getPlainText")
+    )
+
+    assert "프론트 상세 페이지와 동일한 전체 Markdown입니다." in paragraph_text
 
 
 def test_report_service_sorts_findings_like_analysis_ui() -> None:

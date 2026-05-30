@@ -422,6 +422,21 @@ class AnalysisService:
             raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
         return self._build_analysis_response(analysis_id, result)
 
+    def get_report_result(self, analysis_id: str, user_id: int) -> dict[str, object]:
+        """Return the full stored result for PDF generation.
+
+        The public result endpoint intentionally compacts finding_report.markdown
+        into previews. PDF generation needs the same full finding payload that
+        the finding-detail endpoint renders in the UI.
+        """
+        result = self.result_store.get(analysis_id, user_id)
+        if result is None:
+            raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
+        analysis = result.get("analysis_result", {}) if isinstance(result, dict) else {}
+        return {
+            "analysis_id": analysis_id,
+            "analysis_result": analysis,
+        }
 
     def get_finding_detail(self, analysis_id: str, finding_id: str, user_id: int) -> dict[str, object]:
         result = self.result_store.get(analysis_id, user_id)

@@ -161,6 +161,7 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
             )
             markdown = self._generate_finding_markdown_from_payload(payload_json)
             markdown = _clean_markdown(markdown)
+            markdown = _ensure_remediation_sections(markdown, finding)
             if self.settings.llm_finding_detail_markdown_max_chars > 0:
                 markdown = _truncate(
                     markdown,
@@ -1097,6 +1098,24 @@ def _extract_proposed_patch(markdown: str) -> str | None:
         return None
     patch = match.group(1).strip()
     return patch or None
+
+
+def _ensure_remediation_sections(markdown: str, finding: dict[str, Any]) -> str:
+    """Make deterministic remediation visible even when the LLM is conservative."""
+    sections = [markdown.strip()]
+    recommendation = str(finding.get("recommendation") or "").strip()
+    safe_example = str(finding.get("safe_example") or "").strip()
+    code_snippet = str(finding.get("code_snippet") or "").strip()
+
+    if recommendation and not re.search(r"(?im)^#\s+수정 방법\s*$", markdown):
+        sections.append(f"# 수정 방법\n{recommendation}")
+    elif recommendation and recommendation not in markdown:
+        sections.append(f"# 보강 수정 권고\n{recommendation}")
+
+    if safe_example and not re.search(r"(?im)^#\s+수정 예시\s*$", markdown):
+        sections.append(f"# 수정 예시\n{_build_static_diff_patch(code_snippet=code_snippet, safe_example=safe_example)}")
+
+    return "\n\n".join(section for section in sections if section)
 
 
 def _build_static_diff_patch(*, code_snippet: str, safe_example: str) -> str:

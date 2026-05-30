@@ -54,7 +54,7 @@ class ReportService:
         self._register_fonts()
 
     def build_pdf(self, analysis_id: str, user_id: int) -> tuple[str, bytes]:
-        response = self.analysis_service.get_result(analysis_id, user_id)
+        response = self._get_pdf_source_result(analysis_id, user_id)
         analysis = response.get("analysis_result", {})
         if not isinstance(analysis, dict):
             raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
@@ -76,6 +76,12 @@ class ReportService:
         story = self._build_story(analysis)
         document.build(story)
         return filename, buffer.getvalue()
+
+    def _get_pdf_source_result(self, analysis_id: str, user_id: int) -> dict[str, Any]:
+        get_report_result = getattr(self.analysis_service, "get_report_result", None)
+        if callable(get_report_result):
+            return get_report_result(analysis_id, user_id)
+        return self.analysis_service.get_result(analysis_id, user_id)
 
     def _build_story(self, analysis: dict[str, Any]) -> list[Any]:
         summary = analysis.get("summary", {})
@@ -461,6 +467,8 @@ class ReportService:
             story.append(KeepTogether(lead_block))
             story.append(Spacer(1, 1.5 * mm))
 
+            self._append_remediation_summary(story, finding, styles)
+
             markdown_report = self._finding_markdown_report_text(finding)
             if markdown_report:
                 story.append(Paragraph("상세 Markdown 보고서", styles["subheading"]))
@@ -493,6 +501,26 @@ class ReportService:
                 story.append(Spacer(1, 1.2 * mm))
 
             story.append(Spacer(1, 2 * mm))
+
+    def _append_remediation_summary(
+        self,
+        story: list[Any],
+        finding: dict[str, Any],
+        styles: dict[str, ParagraphStyle],
+    ) -> None:
+        fix_method = self._build_fix_method_text(finding)
+        patch_text = self._build_remediation_patch_text(finding)
+        if not fix_method and not patch_text:
+            return
+
+        story.append(Paragraph("우선 수정 권고", styles["subheading"]))
+        if fix_method:
+            story.append(Paragraph(self._paragraphify(fix_method), styles["body"]))
+            story.append(Spacer(1, 1.2 * mm))
+        if patch_text:
+            story.append(Paragraph("수정 예시", styles["subheading"]))
+            self._append_markdownish_report(story, patch_text, styles)
+            story.append(Spacer(1, 1.2 * mm))
 
     @staticmethod
     def _finding_markdown_report_text(finding: dict[str, Any]) -> str:
@@ -557,11 +585,27 @@ class ReportService:
         recommendation = str(finding.get("recommendation") or "").strip()
         return recommendation
 
+    @staticmethod
+    def _build_remediation_patch_text(finding: dict[str, Any]) -> str:
+        report = finding.get("finding_report")
+        if isinstance(report, dict):
+            proposed_patch = str(report.get("proposed_patch") or "").strip()
+            if proposed_patch:
+                return proposed_patch
+
+        safe_example = str(finding.get("safe_example") or "").strip()
+        if safe_example:
+            return f"```java\n{safe_example}\n```"
+        return ""
+
     def _build_code_block(self, code_snippet: str) -> Table:
         code_style = ParagraphStyle(
             "ReportCode",
             parent=self._build_styles()["table"],
-            fontName="Courier",
+            # Courier does not contain Hangul glyphs, so Java comments like
+            # "// 파일 읽기" render as black squares in generated PDFs. Use the
+            # same Korean CID font as the rest of the report for code blocks.
+            fontName=_PDF_FONT_NAME,
             fontSize=8.3,
             leading=10.5,
             textColor=colors.whitesmoke,
