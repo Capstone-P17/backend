@@ -347,9 +347,7 @@ finding JSON:
     def _build_vulnerability_briefs(self, vulnerabilities: list[dict[str, Any]]) -> list[dict[str, Any]]:
         briefs: list[dict[str, Any]] = []
         for finding in vulnerabilities:
-            guideline_refs = [
-                reference for reference in finding.get("guideline_refs", []) if isinstance(reference, dict)
-            ]
+            guideline_refs = _select_relevant_guideline_refs_for_finding(finding)
             brief: dict[str, Any] = {
                 "id": finding.get("id"),
                 "type": finding.get("type"),
@@ -393,8 +391,8 @@ finding JSON:
                 {
                     str(reference.get("id"))
                     for finding in findings
-                    for reference in finding.get("guideline_refs", [])
-                    if isinstance(reference, dict) and reference.get("id")
+                    for reference in _select_relevant_guideline_refs_for_finding(finding)
+                    if reference.get("id")
                 }
             )
             groups.append(
@@ -418,8 +416,8 @@ finding JSON:
     def _build_guideline_catalog(self, vulnerabilities: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         catalog: dict[str, dict[str, Any]] = {}
         for finding in vulnerabilities:
-            for reference in finding.get("guideline_refs", []):
-                if not isinstance(reference, dict) or not reference.get("id"):
+            for reference in _select_relevant_guideline_refs_for_finding(finding):
+                if not reference.get("id"):
                     continue
                 ref_id = str(reference["id"])
                 entry = catalog.setdefault(
@@ -573,8 +571,7 @@ finding JSON:
             "call_chain": _bounded_list(finding.get("call_chain", []), max_items=8),
             "guideline_refs": [
                 self._build_guideline_explanation_brief(reference)
-                for reference in finding.get("guideline_refs", [])
-                if isinstance(reference, dict)
+                for reference in _select_relevant_guideline_refs_for_finding(finding)
             ],
         }
 
@@ -609,8 +606,7 @@ finding JSON:
     def _build_finding_detail_brief(self, finding: dict[str, Any]) -> dict[str, Any]:
         guideline_refs = [
             self._build_guideline_explanation_brief(reference)
-            for reference in finding.get("guideline_refs", [])
-            if isinstance(reference, dict)
+            for reference in _select_relevant_guideline_refs_for_finding(finding)
         ]
         return {
             "id": finding.get("id"),
@@ -677,9 +673,59 @@ finding JSON:
         budget = self.settings.llm_finding_detail_payload_max_chars
         if budget <= 0 or len(dumped) <= budget:
             return dumped
+
+        compact_payload = self._compact_finding_detail_payload(payload)
+        compact_dumped = json.dumps(compact_payload, ensure_ascii=False, indent=2)
+        if len(compact_dumped) <= budget:
+            return compact_dumped
         raise ContextBudgetExceededError(
-            f"Finding detail payload is {len(dumped)} chars, budget is {budget} chars."
+            f"Finding detail payload is {len(compact_dumped)} chars after compaction; budget is {budget} chars."
         )
+
+    def _compact_finding_detail_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        compact = deepcopy(payload)
+        compact["budget_compaction"] = {
+            "applied": True,
+            "policy": (
+                "Kept the selected finding, location, citations, and concise code/call-chain evidence; "
+                "trimmed long prose and guide excerpts for this LLM prompt only."
+            ),
+        }
+        finding = compact.get("finding")
+        if not isinstance(finding, dict):
+            return compact
+
+        field_limits = {
+            "description": 320,
+            "evidence": 500,
+            "recommendation": 420,
+            "safe_example": 420,
+            "code_snippet": 700,
+            "confidence_reason": 420,
+        }
+        for field, max_chars in field_limits.items():
+            if field in finding:
+                finding[field] = _truncate(str(finding.get(field) or ""), max_chars=max_chars)
+
+        finding["call_chain"] = _bounded_list(finding.get("call_chain", []), max_items=4)
+        finding["call_chain_details"] = [
+            _compact_mapping_strings(item, max_chars=180)
+            for item in _bounded_list(finding.get("call_chain_details", []), max_items=4)
+            if isinstance(item, dict)
+        ]
+        if isinstance(finding.get("llm_explanation"), dict):
+            finding["llm_explanation"] = _compact_llm_explanation(finding["llm_explanation"])
+
+        compact_refs: list[dict[str, Any]] = []
+        for reference in finding.get("guideline_refs", []):
+            if not isinstance(reference, dict):
+                continue
+            ref = dict(reference)
+            for field in ("why_vulnerable", "diagnosis_rules", "fix_rules"):
+                ref[field] = _truncate(str(ref.get(field) or ""), max_chars=260)
+            compact_refs.append(ref)
+        finding["guideline_refs"] = compact_refs
+        return compact
 
     @staticmethod
     def build_static_finding_markdown_report(
@@ -703,9 +749,7 @@ finding JSON:
             item for item in _bounded_list(finding.get("call_chain_details", []), max_items=8)
             if isinstance(item, dict)
         ]
-        citations = _collect_allowed_citations(
-            [reference for reference in finding.get("guideline_refs", []) if isinstance(reference, dict)]
-        )
+        citations = _collect_allowed_citations(_select_relevant_guideline_refs_for_finding(finding))
         citation_lines = (
             "\n".join(
                 f"- {citation.get('source')} {citation.get('version')} "
@@ -862,6 +906,58 @@ finding JSON:
         return str(content)
 
 
+def _select_relevant_guideline_refs_for_finding(finding: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return only citation refs specifically grounded to this finding.
+
+    Older analysis results may already contain over-broad category matches. Keep
+    detector/CWE/item-specific references and use category only as a tie-breaker
+    so an SQL injection report cannot cite every "입력데이터 검증 및 표현" section.
+    """
+    refs = [reference for reference in finding.get("guideline_refs", []) if isinstance(reference, dict)]
+    if not refs:
+        return []
+
+    detector_type = _normalize_reference_value(finding.get("type"))
+    finding_cwes = _normalize_reference_values(finding.get("cwe"))
+    guide_item = _normalize_reference_value(finding.get("guide_item"))
+    guide_category = _normalize_reference_value(finding.get("guide_category"))
+
+    matches: list[tuple[int, int, dict[str, Any]]] = []
+    for index, reference in enumerate(refs):
+        score = 0
+        ref_detector_types = {
+            _normalize_reference_value(value)
+            for value in _listish(reference.get("detector_types"))
+        }
+        ref_cwes = {
+            _normalize_reference_value(value)
+            for value in _listish(reference.get("cwe"))
+        }
+        if detector_type and detector_type in ref_detector_types:
+            score += 100
+        if finding_cwes and finding_cwes.intersection(ref_cwes):
+            score += 50
+        if guide_item and guide_item == _normalize_reference_value(reference.get("item")):
+            score += 30
+        if score <= 0:
+            continue
+        if guide_category and guide_category == _normalize_reference_value(reference.get("category")):
+            score += 5
+        matches.append((score, index, reference))
+
+    matches.sort(key=lambda match: (-match[0], match[1]))
+    if matches:
+        return [reference for _, _, reference in matches]
+
+    # Some tests and legacy stored results carry a single already-resolved
+    # guideline ref without detector_types/CWE metadata. Preserve that one
+    # citation, but never preserve a multi-ref category bundle without a
+    # specific match.
+    if len(refs) == 1:
+        return refs
+    return []
+
+
 def _collect_allowed_citations(guideline_refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return _dedupe_citations(
         [
@@ -896,6 +992,48 @@ def _bounded_list(value: Any, *, max_items: int) -> list[Any]:
     if not isinstance(value, list):
         return []
     return value[:max_items]
+
+
+def _listish(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, (tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _normalize_reference_values(value: Any) -> set[str]:
+    return {
+        normalized
+        for item in _listish(value)
+        if (normalized := _normalize_reference_value(item))
+    }
+
+
+def _normalize_reference_value(value: Any) -> str:
+    return str(value or "").strip().casefold()
+
+
+def _compact_mapping_strings(value: dict[str, Any], *, max_chars: int) -> dict[str, Any]:
+    return {
+        key: _truncate(item, max_chars=max_chars) if isinstance(item, str) else item
+        for key, item in value.items()
+    }
+
+
+def _compact_llm_explanation(value: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(value)
+    for field in ("why_vulnerable", "how_to_fix", "grounding_notes"):
+        if field in compact and compact[field] is not None:
+            compact[field] = _truncate(str(compact[field]), max_chars=420)
+    if isinstance(compact.get("fix_steps"), list):
+        compact["fix_steps"] = [
+            _truncate(str(item), max_chars=180)
+            for item in compact["fix_steps"][:5]
+        ]
+    return compact
 
 
 def _finding_id(finding: dict[str, Any]) -> str:

@@ -4,6 +4,7 @@ import json
 
 from src.app.core.config import get_settings
 from src.app.services.analysis_service import AnalysisService
+from src.app.services.guidelines.repository import GuidelineRepository
 from src.app.services.llm_report_service import ContextBudgetExceededError, SecurityReportGenerator
 from src.app.services.result_store import AnalysisResultStore
 
@@ -83,7 +84,11 @@ def test_final_report_payload_deduplicates_guidelines_and_excludes_raw_guideline
     assert "PreparedStatement를 사용한다.PreparedStatement를 사용한다." not in serialized
     assert "Statement 객체를 통해 쿼리가 실행되는 부분" not in serialized
     assert all("guideline_refs" not in item for item in payload["vulnerabilities"])
-    assert all(item["guideline_ref_ids"] == ["kr-sw-security-guide-2019-sql-injection"] for item in payload["vulnerabilities"])
+    assert any(item["guideline_ref_ids"] == ["kr-sw-security-guide-2019-sql-injection"] for item in payload["vulnerabilities"])
+    assert all(
+        item["guideline_ref_ids"] in ([], ["kr-sw-security-guide-2019-sql-injection"])
+        for item in payload["vulnerabilities"]
+    )
 
 
 def test_guideline_catalog_deduplicates_allowed_citations() -> None:
@@ -99,6 +104,71 @@ def test_guideline_catalog_deduplicates_allowed_citations() -> None:
     assert len(catalog_entry["allowed_citations"]) == 1
 
 
+def test_finding_detail_payload_filters_stale_category_wide_guidelines() -> None:
+    repository = GuidelineRepository.load()
+    stale_category_refs = [
+        reference.to_finding_payload()
+        for reference in repository.references
+        if reference.category == "입력데이터 검증 및 표현"
+    ]
+    selected = finding(1)
+    selected.update(
+        {
+            "type": "SQL_INJECTION",
+            "cwe": "CWE-89",
+            "guide_item": "SQL 삽입",
+            "guide_category": "입력데이터 검증 및 표현",
+            "guideline_refs": stale_category_refs,
+        }
+    )
+
+    payload = SecurityReportGenerator(get_settings())._build_finding_detail_payload(
+        finding=selected,
+        analysis={"repository": "repo", "language": "java", "vulnerabilities": [selected]},
+    )
+
+    refs = payload["finding"]["guideline_refs"]
+    assert [ref["section"] for ref in refs] == ["입력데이터 검증 및 표현 - SQL 삽입"]
+
+
+def test_finding_detail_payload_compacts_before_budget_failure() -> None:
+    settings = get_settings().model_copy(update={"llm_finding_detail_payload_max_chars": 9_000})
+    selected = finding(2)
+    selected.update(
+        {
+            "code_snippet": "String sql = request.getParameter(\"q\");\n" * 120,
+            "safe_example": "PreparedStatement ps = conn.prepareStatement(\"SELECT * FROM users WHERE id = ?\");\n"
+            * 80,
+            "call_chain_details": [
+                {
+                    "label": f"step-{index}",
+                    "file": "src/VeryLongPath.java",
+                    "function": "run",
+                    "note": "long note " * 80,
+                }
+                for index in range(12)
+            ],
+            "llm_explanation": {
+                "why_vulnerable": "외부 입력이 SQL 문자열에 결합됩니다." * 120,
+                "how_to_fix": "파라미터 바인딩을 사용합니다." * 120,
+                "fix_steps": ["PreparedStatement 적용" * 40 for _ in range(8)],
+                "cited_guideline_ids": ["kr-sw-security-guide-2019-sql-injection"],
+                "citations": guideline_ref()["citations"],
+            },
+        }
+    )
+    generator = SecurityReportGenerator(settings)
+    payload = generator._build_finding_detail_payload(
+        finding=selected,
+        analysis={"repository": "repo", "language": "java", "vulnerabilities": [selected]},
+    )
+
+    dumped = generator._dump_finding_detail_payload_with_budget(payload)
+
+    assert len(dumped) <= settings.llm_finding_detail_payload_max_chars
+    assert "budget_compaction" in dumped
+
+
 def test_finding_explanation_input_uses_compact_guideline_brief_limits() -> None:
     settings = get_settings().model_copy(
         update={
@@ -108,7 +178,7 @@ def test_finding_explanation_input_uses_compact_guideline_brief_limits() -> None
             "llm_finding_evidence_max_chars": 35,
         }
     )
-    payload = SecurityReportGenerator(settings)._build_finding_explanation_input(finding(1))
+    payload = SecurityReportGenerator(settings)._build_finding_explanation_input(finding(2))
     ref = payload["guideline_refs"][0]
 
     assert set(ref) == {

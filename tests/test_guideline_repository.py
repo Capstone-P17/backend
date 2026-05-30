@@ -21,6 +21,20 @@ def test_guideline_repository_maps_detector_type_to_reference() -> None:
     assert refs[0].page_start == 178
     assert refs[0].page_end == 191
     assert "PreparedStatement" in refs[0].security_measures
+    assert [ref.item for ref in refs] == ["SQL 삽입"]
+
+
+def test_guideline_repository_does_not_match_category_only() -> None:
+    repository = GuidelineRepository.load()
+
+    refs = repository.find_for_finding(
+        {
+            "type": "UNKNOWN",
+            "guide_category": "입력데이터 검증 및 표현",
+        }
+    )
+
+    assert refs == []
 
 
 def test_guideline_repository_returns_multiple_refs_for_broad_detector_type() -> None:

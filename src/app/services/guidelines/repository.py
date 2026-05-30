@@ -41,10 +41,17 @@ class GuidelineRepository:
                 score += 50
             if guide_item and guide_item == _normalize(reference.item):
                 score += 30
+
+            # Category alone is too broad for citation grounding. For example, an
+            # SQL injection finding belongs to "입력데이터 검증 및 표현", but that
+            # category also contains XSS, path traversal, command injection, and
+            # many other unrelated guide sections. Use category only as a
+            # tie-breaker once a detector/CWE/item-specific signal matched.
+            if score <= 0:
+                continue
             if guide_category and guide_category == _normalize(reference.category):
                 score += 5
-            if score > 0:
-                matches.append((score, reference))
+            matches.append((score, reference))
 
         matches.sort(key=lambda match: (-match[0], match[1].page_start, match[1].id))
         return [reference for _, reference in matches]
