@@ -31,3 +31,16 @@ def test_docs_can_be_disabled_from_environment(monkeypatch: pytest.MonkeyPatch) 
 
     assert client.get("/docs").status_code == 404
     assert "docs" not in client.get("/").json()
+
+
+def test_logging_settings_can_be_configured_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    monkeypatch.setenv("LOG_FILE_ENABLED", "true")
+    monkeypatch.setenv("LOG_FILE_PATH", "logs/test-backend.log")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+
+    assert settings.log_level == "DEBUG"
+    assert settings.log_file_enabled is True
+    assert settings.log_file_path == "logs/test-backend.log"

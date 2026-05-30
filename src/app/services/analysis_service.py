@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
@@ -12,6 +13,7 @@ from urllib.parse import quote
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 import httpx
+from loguru import logger
 
 from src.app.core.config import Settings
 from src.app.services.llm_report_service import ContextBudgetExceededError
@@ -102,6 +104,9 @@ class AnalysisService:
         self.guideline_repository = guideline_repository
 
     def analyze_uploaded_file(self, filename: str, content: bytes, user_id: int) -> dict[str, object]:
+        started = time.perf_counter()
+        bound = logger.bind(component="analysis.service", user_id=user_id, source="file")
+        bound.info("analysis_started filename={} bytes={}", filename, len(content))
         try:
             with self.prepare_uploaded_file(filename=filename, content=content) as prepared_target:
                 result = self.analyzer_service.analyze(prepared_target.target_path)
@@ -110,10 +115,18 @@ class AnalysisService:
         except UploadTooLargeError:
             raise
         except Exception as exc:
+            bound.exception("analysis_failed filename={}", filename)
             raise AnalysisExecutionError("파일 분석 중 오류 발생") from exc
 
         self._attach_source_metadata(result, prepared_target)
-        return self._save_public_result(result, user_id)
+        response = self._save_public_result(result, user_id)
+        bound.info(
+            "analysis_finished filename={} analysis_id={} duration_ms={:.2f}",
+            filename,
+            response["analysis_id"],
+            (time.perf_counter() - started) * 1000,
+        )
+        return response
 
     @contextmanager
     def prepare_uploaded_file(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
@@ -131,6 +144,9 @@ class AnalysisService:
             )
 
     def analyze_uploaded_repository(self, filename: str, content: bytes, user_id: int) -> dict[str, object]:
+        started = time.perf_counter()
+        bound = logger.bind(component="analysis.service", user_id=user_id, source="archive")
+        bound.info("analysis_started filename={} bytes={}", filename, len(content))
         try:
             with self.prepare_uploaded_repository(filename=filename, content=content) as prepared_target:
                 result = self.analyzer_service.analyze(
@@ -144,10 +160,18 @@ class AnalysisService:
         except UploadTooLargeError:
             raise
         except Exception as exc:
+            bound.exception("analysis_failed filename={}", filename)
             raise AnalysisExecutionError("업로드한 레포지토리 분석 중 오류 발생") from exc
 
         self._attach_source_metadata(result, prepared_target)
-        return self._save_public_result(result, user_id)
+        response = self._save_public_result(result, user_id)
+        bound.info(
+            "analysis_finished filename={} analysis_id={} duration_ms={:.2f}",
+            filename,
+            response["analysis_id"],
+            (time.perf_counter() - started) * 1000,
+        )
+        return response
 
     @contextmanager
     def prepare_uploaded_repository(self, filename: str, content: bytes) -> Iterator[PreparedAnalysisTarget]:
@@ -172,6 +196,9 @@ class AnalysisService:
             )
 
     def analyze_github_repository(self, url: str, user_id: int) -> dict[str, object]:
+        started = time.perf_counter()
+        bound = logger.bind(component="analysis.service", user_id=user_id, source="github")
+        bound.info("analysis_started url={}", url)
         try:
             with self.prepare_github_repository(url=url) as prepared_target:
                 result = self.analyzer_service.analyze(
@@ -186,10 +213,18 @@ class AnalysisService:
         ):
             raise
         except Exception as exc:
+            bound.exception("analysis_failed url={}", url)
             raise AnalysisExecutionError("GitHub 레포지토리 분석 중 오류 발생") from exc
 
         self._attach_source_metadata(result, prepared_target)
-        return self._save_public_result(result, user_id)
+        response = self._save_public_result(result, user_id)
+        bound.info(
+            "analysis_finished url={} analysis_id={} duration_ms={:.2f}",
+            url,
+            response["analysis_id"],
+            (time.perf_counter() - started) * 1000,
+        )
+        return response
 
     @contextmanager
     def prepare_github_repository(self, url: str) -> Iterator[PreparedAnalysisTarget]:
@@ -227,21 +262,43 @@ class AnalysisService:
         for branch in _DEFAULT_BRANCHES:
             archive_url = _GITHUB_ARCHIVE_URL.format(owner=owner, repo=repo, branch=branch)
             try:
+                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
+                    "github_archive_download_started url={}",
+                    archive_url,
+                )
                 with httpx.Client(follow_redirects=True, timeout=_CLONE_TIMEOUT_SECONDS) as client:
                     response = client.get(archive_url)
                 if response.status_code == 200:
                     self._validate_upload_size(len(response.content))
+                    logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
+                        "github_archive_download_succeeded bytes={}",
+                        len(response.content),
+                    )
                     return response.content, branch
                 if response.status_code == 404:
+                    logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).debug(
+                        "github_archive_branch_not_found"
+                    )
                     continue
+                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
+                    "github_archive_download_failed status={}",
+                    response.status_code,
+                )
                 raise GitHubRepositoryCloneError(
                     f"GitHub 레포지토리 다운로드 실패 (HTTP {response.status_code})"
                 )
             except httpx.TimeoutException as exc:
+                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
+                    "github_archive_download_timeout"
+                )
                 raise GitHubRepositoryCloneError(
                     "GitHub 레포지토리 다운로드 시간이 초과되었습니다"
                 ) from exc
             except httpx.RequestError as exc:
+                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
+                    "github_archive_request_error error={}",
+                    str(exc) or type(exc).__name__,
+                )
                 last_exc = exc
 
         if last_exc:
@@ -253,15 +310,29 @@ class AnalysisService:
         )
 
     def get_latest_result(self, user_id: int) -> dict[str, object]:
+        logger.bind(component="analysis.service", user_id=user_id).debug("latest_result_lookup_started")
         latest_result = self.result_store.get_latest(user_id)
         if latest_result is None:
+            logger.bind(component="analysis.service", user_id=user_id).warning("latest_result_lookup_miss")
             raise AnalysisResultNotFoundError("분석 결과가 없습니다")
         analysis_id, result = latest_result
+        logger.bind(component="analysis.service", user_id=user_id, analysis_id=analysis_id).debug(
+            "latest_result_lookup_hit analysis_id={}",
+            analysis_id,
+        )
         return self._build_analysis_response(analysis_id, result)
 
     def get_result(self, analysis_id: str, user_id: int) -> dict[str, object]:
+        logger.bind(component="analysis.service", user_id=user_id, analysis_id=analysis_id).debug(
+            "analysis_result_lookup_started analysis_id={}",
+            analysis_id,
+        )
         result = self.result_store.get(analysis_id, user_id)
         if result is None:
+            logger.bind(component="analysis.service", user_id=user_id, analysis_id=analysis_id).warning(
+                "analysis_result_lookup_miss analysis_id={}",
+                analysis_id,
+            )
             raise AnalysisResultNotFoundError("분석 결과를 찾을 수 없습니다")
         return self._build_analysis_response(analysis_id, result)
 
@@ -380,6 +451,11 @@ class AnalysisService:
             )
 
     def _extract_repository_archive(self, archive_path: Path, extract_root: Path) -> None:
+        logger.bind(component="analysis.archive").debug(
+            "archive_extract_started archive={} target={}",
+            archive_path.name,
+            str(extract_root),
+        )
         try:
             with ZipFile(archive_path) as archive_file:
                 members = archive_file.infolist()
@@ -389,6 +465,11 @@ class AnalysisService:
                 for member in members:
                     self._validate_archive_member_path(member.filename)
                 archive_file.extractall(extract_root)
+                logger.bind(component="analysis.archive").info(
+                    "archive_extract_finished archive={} members={}",
+                    archive_path.name,
+                    len(members),
+                )
         except BadZipFile as exc:
             raise InvalidRepositoryArchiveError("유효한 ZIP 파일이 아닙니다") from exc
         except InvalidRepositoryArchiveError:
@@ -519,13 +600,32 @@ class AnalysisService:
         return min(line_numbers), max(line_numbers)
 
     def _save_public_result(self, result: dict[str, object], user_id: int) -> dict[str, object]:
+        started = time.perf_counter()
+        logger.bind(component="analysis.pipeline", user_id=user_id).debug("result_sanitize_started")
         sanitized_result = self._sanitize_public_result(result)
+        analysis = sanitized_result.get("analysis_result", {})
+        vulnerabilities = analysis.get("vulnerabilities", []) if isinstance(analysis, dict) else []
+        logger.bind(component="analysis.pipeline", user_id=user_id).info(
+            "result_processing_started files={} findings={}",
+            analysis.get("files_analyzed", 0) if isinstance(analysis, dict) else 0,
+            len(vulnerabilities) if isinstance(vulnerabilities, list) else 0,
+        )
         self._attach_guideline_references(sanitized_result)
+        logger.bind(component="analysis.pipeline", user_id=user_id).debug("guideline_references_attached")
         self._attach_compact_finding_titles(sanitized_result)
+        logger.bind(component="analysis.pipeline", user_id=user_id).debug("compact_finding_titles_attached")
         self._attach_finding_explanations(sanitized_result)
+        logger.bind(component="analysis.pipeline", user_id=user_id).debug("finding_explanations_attached")
         self._attach_finding_markdown_reports(sanitized_result)
+        logger.bind(component="analysis.pipeline", user_id=user_id).debug("finding_markdown_reports_attached")
         self._attach_llm_report(sanitized_result)
+        logger.bind(component="analysis.pipeline", user_id=user_id).debug("llm_summary_report_attached")
         analysis_id = self.result_store.save(sanitized_result, user_id)
+        logger.bind(component="analysis.pipeline", user_id=user_id, analysis_id=analysis_id).info(
+            "result_saved analysis_id={} duration_ms={:.2f}",
+            analysis_id,
+            (time.perf_counter() - started) * 1000,
+        )
         return self._build_analysis_response(analysis_id, sanitized_result)
 
 
@@ -566,10 +666,30 @@ class AnalysisService:
             if not isinstance(finding, dict):
                 continue
             if self._has_full_finding_markdown(finding.get("finding_report")):
+                logger.bind(component="analysis.finding_report", finding_id=self._finding_identifier(finding)).debug(
+                    "finding_report_already_present finding_id={}",
+                    self._finding_identifier(finding),
+                )
                 continue
+            finding_id = self._finding_identifier(finding)
+            report_started = time.perf_counter()
+            logger.bind(component="analysis.finding_report", finding_id=finding_id).debug(
+                "finding_report_generation_started finding_id={} type={} severity={}",
+                finding_id,
+                finding.get("type", "UNKNOWN"),
+                finding.get("severity", "UNKNOWN"),
+            )
             finding["finding_report"] = self._generate_finding_markdown_report(
                 finding=finding,
                 analysis=analysis,
+            )
+            report = finding.get("finding_report")
+            report_status = report.get("status", "unknown") if isinstance(report, dict) else "unknown"
+            logger.bind(component="analysis.finding_report", finding_id=finding_id).info(
+                "finding_report_generation_finished finding_id={} status={} duration_ms={:.2f}",
+                finding_id,
+                report_status,
+                (time.perf_counter() - report_started) * 1000,
             )
 
     @staticmethod

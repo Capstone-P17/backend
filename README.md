@@ -80,6 +80,8 @@ ALLOWED_ORIGINS=["http://localhost:3000"]
 
 - `OPENAI_API_KEY`: LLM 리포트 생성 사용 시 필요
 - `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`: GitHub OAuth 로그인 사용 시 필요
+- `LOG_LEVEL`: 로컬 디버깅 시 `DEBUG`로 설정하면 요청, 분석 파이프라인, 정적 분석, LLM 리포트 생성 흐름을 더 자세히 확인할 수 있음
+- `LOG_FILE_ENABLED=true`: 콘솔 외에 `LOG_FILE_PATH`로 지정한 파일에도 회전 로그 저장
 
 ## Docker 실행
 

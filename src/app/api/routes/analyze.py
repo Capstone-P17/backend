@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile, status
 from fastapi.responses import JSONResponse
+from loguru import logger
 
 from src.app.api.deps import get_analysis_job_store, get_analysis_service, get_current_user
 from src.app.api.upload import read_upload_with_limit
@@ -39,6 +40,10 @@ def _run_repository_analysis_job(
     service: AnalysisService,
     job_store: AnalysisJobStore,
 ) -> None:
+    logger.bind(component="analysis.job", job_id=job_id, user_id=user_id).info(
+        "repository_analysis_job_started url={}",
+        url,
+    )
     job_store.update(job_id, status="running")
     try:
         response = service.analyze_github_repository(url=url, user_id=user_id)
@@ -47,8 +52,16 @@ def _run_repository_analysis_job(
             status="succeeded",
             analysis_id=str(response["analysis_id"]),
         )
+        logger.bind(component="analysis.job", job_id=job_id, user_id=user_id).info(
+            "repository_analysis_job_succeeded analysis_id={}",
+            response["analysis_id"],
+        )
     except Exception as exc:  # noqa: BLE001 - background job must capture user-facing failure
         job_store.update(job_id, status="failed", error=str(exc) or "레포지토리 분석 작업에 실패했습니다")
+        logger.bind(component="analysis.job", job_id=job_id, user_id=user_id).exception(
+            "repository_analysis_job_failed error={}",
+            str(exc) or type(exc).__name__,
+        )
 
 
 @router.post("/file", response_model=AnalysisResponse)
@@ -62,12 +75,29 @@ async def analyze_file(
 
     try:
         content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
+        logger.bind(component="analysis.api", user_id=current_user.id).info(
+            "file_analysis_requested filename={} bytes={}",
+            file.filename,
+            len(content),
+        )
         return service.analyze_uploaded_file(filename=file.filename, content=content, user_id=current_user.id)
     except UploadTooLargeError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "file_analysis_rejected reason=upload_too_large filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=413, content={"error": str(exc)})
     except InvalidJavaFileError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "file_analysis_rejected reason=invalid_java filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=400, content={"error": str(exc)})
     except AnalysisExecutionError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).exception(
+            "file_analysis_failed filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
@@ -82,18 +112,39 @@ async def analyze_uploaded_archive(
 
     try:
         content = await read_upload_with_limit(file, max_bytes=get_settings().max_upload_bytes)
+        logger.bind(component="analysis.api", user_id=current_user.id).info(
+            "archive_analysis_requested filename={} bytes={}",
+            file.filename,
+            len(content),
+        )
         return service.analyze_uploaded_repository(
             filename=file.filename,
             content=content,
             user_id=current_user.id,
         )
     except UploadTooLargeError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "archive_analysis_rejected reason=upload_too_large filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=413, content={"error": str(exc)})
     except InvalidRepositoryArchiveError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "archive_analysis_rejected reason=invalid_archive filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=400, content={"error": str(exc)})
     except RepositoryArchiveExtractionError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).exception(
+            "archive_analysis_extract_failed filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=500, content={"error": str(exc)})
     except AnalysisExecutionError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).exception(
+            "archive_analysis_failed filename={}",
+            file.filename,
+        )
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
@@ -104,14 +155,34 @@ async def analyze_github_repository(
     service: AnalysisService = Depends(get_analysis_service),
 ) -> dict[str, Any] | JSONResponse:
     try:
+        logger.bind(component="analysis.api", user_id=current_user.id).info(
+            "github_analysis_requested url={}",
+            body.url,
+        )
         return service.analyze_github_repository(url=body.url, user_id=current_user.id)
     except UploadTooLargeError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "github_analysis_rejected reason=upload_too_large url={}",
+            body.url,
+        )
         return JSONResponse(status_code=413, content={"error": str(exc)})
     except (InvalidGitHubRepositoryError, InvalidRepositoryArchiveError) as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "github_analysis_rejected reason=invalid_repository url={}",
+            body.url,
+        )
         return JSONResponse(status_code=400, content={"error": str(exc)})
     except GitHubRepositoryCloneError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).warning(
+            "github_analysis_clone_failed url={}",
+            body.url,
+        )
         return JSONResponse(status_code=502, content={"error": str(exc)})
     except AnalysisExecutionError as exc:
+        logger.bind(component="analysis.api", user_id=current_user.id).exception(
+            "github_analysis_failed url={}",
+            body.url,
+        )
         return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
@@ -128,6 +199,10 @@ async def create_repository_analysis_job(
     job_store: AnalysisJobStore = Depends(get_analysis_job_store),
 ) -> dict[str, str]:
     job = job_store.create()
+    logger.bind(component="analysis.api", job_id=job["job_id"], user_id=current_user.id).info(
+        "repository_analysis_job_created url={}",
+        body.url,
+    )
     background_tasks.add_task(
         _run_repository_analysis_job,
         job_id=job["job_id"],

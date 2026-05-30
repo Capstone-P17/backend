@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Callable
 from uuid import uuid4
 
+from loguru import logger
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,10 @@ class AnalysisResultStore:
         self._owners[analysis_id] = user_id
         self._order.append(analysis_id)
         self._latest_analysis_id_by_user[user_id] = analysis_id
+        logger.bind(component="result_store.memory", user_id=user_id, analysis_id=analysis_id).info(
+            "analysis_result_saved analysis_id={}",
+            analysis_id,
+        )
         return analysis_id
 
     def get(self, analysis_id: str, user_id: int) -> dict[str, Any] | None:
@@ -46,8 +51,16 @@ class AnalysisResultStore:
 
     def update(self, analysis_id: str, user_id: int, result: dict[str, Any]) -> dict[str, Any] | None:
         if self._owners.get(analysis_id) != user_id or analysis_id not in self._results:
+            logger.bind(component="result_store.memory", user_id=user_id, analysis_id=analysis_id).warning(
+                "analysis_result_update_miss analysis_id={}",
+                analysis_id,
+            )
             return None
         self._results[analysis_id] = self._clone(result)
+        logger.bind(component="result_store.memory", user_id=user_id, analysis_id=analysis_id).info(
+            "analysis_result_updated analysis_id={}",
+            analysis_id,
+        )
         return self._clone(self._results[analysis_id])
 
     def list_results(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
@@ -105,6 +118,10 @@ class DatabaseAnalysisResultStore:
         with self._session_factory() as session:
             session.add(record)
             session.commit()
+        logger.bind(component="result_store.db", user_id=user_id, analysis_id=analysis_id).info(
+            "analysis_result_saved analysis_id={}",
+            analysis_id,
+        )
         return analysis_id
 
     def get(self, analysis_id: str, user_id: int) -> dict[str, Any] | None:
@@ -116,7 +133,15 @@ class DatabaseAnalysisResultStore:
                 )
             )
             if record is None:
+                logger.bind(component="result_store.db", user_id=user_id, analysis_id=analysis_id).debug(
+                    "analysis_result_lookup_miss analysis_id={}",
+                    analysis_id,
+                )
                 return None
+            logger.bind(component="result_store.db", user_id=user_id, analysis_id=analysis_id).debug(
+                "analysis_result_lookup_hit analysis_id={}",
+                analysis_id,
+            )
             return deepcopy(record.result_json)
 
     def get_latest(self, user_id: int) -> tuple[str, dict[str, Any]] | None:
@@ -131,6 +156,10 @@ class DatabaseAnalysisResultStore:
                 .limit(1)
             )
             if record is None:
+                logger.bind(component="result_store.db", user_id=user_id, analysis_id=analysis_id).warning(
+                    "analysis_result_update_miss analysis_id={}",
+                    analysis_id,
+                )
                 return None
             return record.analysis_id, deepcopy(record.result_json)
 
@@ -156,6 +185,10 @@ class DatabaseAnalysisResultStore:
             )
             record.result_json = deepcopy(result)
             session.commit()
+            logger.bind(component="result_store.db", user_id=user_id, analysis_id=analysis_id).info(
+                "analysis_result_updated analysis_id={}",
+                analysis_id,
+            )
             return deepcopy(record.result_json)
 
     def list_results(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:

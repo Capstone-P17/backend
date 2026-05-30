@@ -7,6 +7,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from loguru import logger
+
 from src.app.core.config import Settings
 from src.app.schemas.analysis import FindingLLMExplanation, FindingMarkdownReport, FindingReportMetadata
 from src.app.services.llm_grounding import verify_finding_explanation
@@ -37,11 +39,14 @@ class SecurityReportGenerator:
         finding-specific explanation.
         """
         if not self.is_available:
+            logger.bind(component="llm.report").info("finding_explanations_skipped reason=openai_api_key_missing")
             self._mark_finding_explanations_unavailable(result)
             return
 
+        logger.bind(component="llm.report", model=self.settings.openai_model).info("finding_explanations_started")
         llm = self._create_llm()
         self._attach_finding_explanations(result, llm)
+        logger.bind(component="llm.report", model=self.settings.openai_model).info("finding_explanations_finished")
 
     def generate(
         self,
@@ -51,6 +56,11 @@ class SecurityReportGenerator:
         repository: str = "",
         instructions: str = "",
     ) -> str:
+        logger.bind(component="llm.report", model=self.settings.openai_model).info(
+            "summary_report_generation_started target_path={} repository={}",
+            target_path or "(not provided)",
+            repository or "(not provided)",
+        )
         llm = self._create_llm()
         self._attach_finding_explanations(result, llm)
         from langchain_core.prompts import ChatPromptTemplate
@@ -93,6 +103,10 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
 
         analysis_json = self._dump_payload_with_budget(self._build_payload(result))
         try:
+            logger.bind(component="llm.report", model=self.settings.openai_model).debug(
+                "summary_report_prompt_ready chars={}",
+                len(analysis_json),
+            )
             response = (prompt | llm).invoke(
                 {
                     "target_path": target_path or "(not provided)",
@@ -103,9 +117,21 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
             )
         except Exception as exc:  # noqa: BLE001 - normalize provider context-limit errors
             if _is_context_limit_error(exc):
+                logger.bind(component="llm.report", model=self.settings.openai_model).warning(
+                    "summary_report_context_budget_exceeded error={}",
+                    str(exc) or type(exc).__name__,
+                )
                 raise ContextBudgetExceededError(str(exc) or "LLM context budget exceeded") from exc
+            logger.bind(component="llm.report", model=self.settings.openai_model).exception(
+                "summary_report_generation_failed"
+            )
             raise
-        return self._coerce_content(response.content)
+        content = self._coerce_content(response.content)
+        logger.bind(component="llm.report", model=self.settings.openai_model).info(
+            "summary_report_generation_finished chars={}",
+            len(content),
+        )
+        return content
 
     def generate_finding_markdown_report(
         self,
@@ -113,7 +139,12 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
         finding: dict[str, Any],
         analysis: dict[str, Any],
     ) -> dict[str, Any]:
+        finding_id = _finding_id(finding)
         if not self.is_available:
+            logger.bind(component="llm.finding_report", finding_id=finding_id).info(
+                "finding_markdown_report_static_fallback reason=openai_api_key_missing finding_id={}",
+                finding_id,
+            )
             return self.build_static_finding_markdown_report(
                 finding=finding,
                 analysis=analysis,
@@ -123,6 +154,11 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
         try:
             payload = self._build_finding_detail_payload(finding=finding, analysis=analysis)
             payload_json = self._dump_finding_detail_payload_with_budget(payload)
+            logger.bind(component="llm.finding_report", finding_id=finding_id, model=self.settings.openai_model).info(
+                "finding_markdown_report_generation_started finding_id={} prompt_chars={}",
+                finding_id,
+                len(payload_json),
+            )
             markdown = self._generate_finding_markdown_from_payload(payload_json)
             markdown = _clean_markdown(markdown)
             if self.settings.llm_finding_detail_markdown_max_chars > 0:
@@ -146,14 +182,28 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                     source="llm",
                 ),
             )
+            logger.bind(component="llm.finding_report", finding_id=finding_id, model=self.settings.openai_model).info(
+                "finding_markdown_report_generation_finished finding_id={} markdown_chars={}",
+                finding_id,
+                len(markdown),
+            )
             return report.model_dump()
         except ContextBudgetExceededError as exc:
+            logger.bind(component="llm.finding_report", finding_id=finding_id).warning(
+                "finding_markdown_report_context_budget_exceeded finding_id={} error={}",
+                finding_id,
+                str(exc) or type(exc).__name__,
+            )
             return self.build_static_finding_markdown_report(
                 finding=finding,
                 analysis=analysis,
                 reason=str(exc) or "finding 상세 리포트 입력이 context budget을 초과했습니다.",
             )
         except Exception as exc:  # noqa: BLE001 - selected finding detail must survive LLM outages
+            logger.bind(component="llm.finding_report", finding_id=finding_id).exception(
+                "finding_markdown_report_generation_failed finding_id={}",
+                finding_id,
+            )
             return self.build_static_finding_markdown_report(
                 finding=finding,
                 analysis=analysis,

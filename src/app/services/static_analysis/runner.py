@@ -4,6 +4,8 @@ import os
 import re
 from datetime import datetime
 
+from loguru import logger
+
 from src.app.services.static_analysis.call_graph import build_call_graph
 from src.app.services.static_analysis.detectors.command_injection import detect_command_injection
 from src.app.services.static_analysis.detectors.file_upload import detect_dangerous_file_upload
@@ -21,6 +23,7 @@ _MAX_CONTEXT_LINES = (_CONTEXT_RADIUS * 2) + 1
 
 
 def analyze_file(filepath):
+    logger.bind(component="static.runner", file=filepath).info("file_analysis_started file={}", filepath)
     tree, code = parse_file(filepath)
     vuln_counter = [0]
 
@@ -34,6 +37,11 @@ def analyze_file(filepath):
     vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)
     vulnerabilities += detect_dangerous_file_upload(filepath, tree, vuln_counter)
     _attach_code_context(vulnerabilities, code)
+    logger.bind(component="static.runner", file=filepath).info(
+        "file_analysis_finished file={} findings={}",
+        filepath,
+        len(vulnerabilities),
+    )
 
     return {
         "analysis_result": {
@@ -49,6 +57,11 @@ def analyze_file(filepath):
 
 
 def analyze_directory(directory, repository=""):
+    logger.bind(component="static.runner", repository=repository or "-", directory=directory).info(
+        "directory_analysis_started directory={} repository={}",
+        directory,
+        repository,
+    )
     all_vulnerabilities = []
     all_call_graph = {}
     analyzed_files = []
@@ -61,6 +74,7 @@ def analyze_directory(directory, repository=""):
 
             filepath = os.path.join(root, filename)
             analyzed_files.append(filepath)
+            logger.bind(component="static.runner", file=filepath).debug("java_file_analysis_started file={}", filepath)
             tree, code = parse_file(filepath)
             file_vulnerabilities = []
             file_vulnerabilities += detect_hardcoded_secrets(filepath, tree, vuln_counter)
@@ -74,7 +88,18 @@ def analyze_directory(directory, repository=""):
             _attach_code_context(file_vulnerabilities, code)
             all_vulnerabilities += file_vulnerabilities
             all_call_graph.update(build_call_graph(tree))
+            logger.bind(component="static.runner", file=filepath).debug(
+                "java_file_analysis_finished file={} findings={}",
+                filepath,
+                len(file_vulnerabilities),
+            )
 
+    logger.bind(component="static.runner", repository=repository or "-", directory=directory).info(
+        "directory_analysis_finished directory={} files={} findings={}",
+        directory,
+        len(analyzed_files),
+        len(all_vulnerabilities),
+    )
     return {
         "analysis_result": {
             "repository": repository,

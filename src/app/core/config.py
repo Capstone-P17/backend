@@ -52,6 +52,46 @@ class Settings(BaseModel):
     docs_enabled: bool = Field(
         default=True, validation_alias=AliasChoices("DOCS_ENABLED", "AGENT_DOCS_ENABLED")
     )
+    log_level: str = Field(
+        default="INFO",
+        validation_alias=AliasChoices("LOG_LEVEL", "AGENT_LOG_LEVEL"),
+    )
+    log_colorize: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("LOG_COLORIZE", "AGENT_LOG_COLORIZE"),
+    )
+    log_json: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LOG_JSON", "AGENT_LOG_JSON"),
+    )
+    log_backtrace: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LOG_BACKTRACE", "AGENT_LOG_BACKTRACE"),
+    )
+    log_diagnose: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LOG_DIAGNOSE", "AGENT_LOG_DIAGNOSE"),
+    )
+    log_file_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LOG_FILE_ENABLED", "AGENT_LOG_FILE_ENABLED"),
+    )
+    log_file_path: str = Field(
+        default="logs/backend.log",
+        validation_alias=AliasChoices("LOG_FILE_PATH", "AGENT_LOG_FILE_PATH"),
+    )
+    log_file_rotation: str = Field(
+        default="10 MB",
+        validation_alias=AliasChoices("LOG_FILE_ROTATION", "AGENT_LOG_FILE_ROTATION"),
+    )
+    log_file_retention: str = Field(
+        default="14 days",
+        validation_alias=AliasChoices("LOG_FILE_RETENTION", "AGENT_LOG_FILE_RETENTION"),
+    )
+    log_file_compression: str = Field(
+        default="gz",
+        validation_alias=AliasChoices("LOG_FILE_COMPRESSION", "AGENT_LOG_FILE_COMPRESSION"),
+    )
 
     workspace_root: Path = Field(
         default=PROJECT_ROOT,
@@ -292,6 +332,16 @@ class Settings(BaseModel):
             return json.loads(stripped)
 
         return [origin.strip() for origin in stripped.split(",") if origin.strip()]
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.strip().upper()
+            if normalized not in {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}:
+                raise ValueError("LOG_LEVEL must be one of TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL.")
+            return normalized
+        return value
 
     @model_validator(mode="after")
     def validate_deployment_security(self) -> "Settings":

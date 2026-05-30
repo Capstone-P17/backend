@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from src.app.services.static_analysis import analyze_directory, analyze_file
 
 
@@ -14,17 +16,32 @@ class AnalyzerService:
 
     def analyze(self, target_path: str, repository: str = "") -> dict[str, Any]:
         resolved_target = self.resolve_target(target_path)
+        bound = logger.bind(component="analyzer", repository=repository or "-", target=str(resolved_target))
+        bound.info(
+            "static_analysis_started target={} kind={}",
+            str(resolved_target),
+            "file" if resolved_target.is_file() else "directory",
+        )
 
         if resolved_target.is_file():
             result = analyze_file(str(resolved_target))
         else:
             result = analyze_directory(str(resolved_target), repository=repository)
 
-        return self._normalize_result(
+        normalized = self._normalize_result(
             result=result,
             resolved_target=resolved_target,
             repository=repository,
         )
+        analysis = normalized.get("analysis_result", {})
+        vulnerabilities = analysis.get("vulnerabilities", []) if isinstance(analysis, dict) else []
+        bound.info(
+            "static_analysis_finished target={} files={} findings={}",
+            str(resolved_target),
+            analysis.get("files_analyzed", 0) if isinstance(analysis, dict) else 0,
+            len(vulnerabilities) if isinstance(vulnerabilities, list) else 0,
+        )
+        return normalized
 
     def resolve_target(self, target_path: str) -> Path:
         candidate = Path(target_path)
@@ -33,9 +50,18 @@ class AnalyzerService:
 
         resolved = candidate.resolve()
         if not resolved.exists():
+            logger.bind(component="analyzer", target=target_path).warning(
+                "analysis_target_missing target={}",
+                target_path,
+            )
             raise FileNotFoundError(f"Analysis target does not exist: {target_path}")
 
         if resolved != self.workspace_root and self.workspace_root not in resolved.parents:
+            logger.bind(component="analyzer", target=str(resolved)).warning(
+                "analysis_target_outside_workspace target={} workspace={}",
+                str(resolved),
+                str(self.workspace_root),
+            )
             raise ValueError("Analysis target must stay inside the project workspace.")
 
         return resolved
