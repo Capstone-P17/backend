@@ -226,6 +226,62 @@ def test_analysis_result_generates_contextual_finding_title_and_description() ->
     assert stored_finding["description"] == finding["description"]
 
 
+def test_analysis_result_extracts_sink_from_call_chain_with_ellipsis() -> None:
+    class FakeAnalyzerService:
+        def analyze(self, target_path: str, repository: str = "") -> dict:
+            return {
+                "analysis_result": {
+                    "repository": repository,
+                    "target_path": target_path,
+                    "language": "java",
+                    "files_analyzed": 1,
+                    "analyzed_at": "2026-01-01T00:00:00",
+                    "call_graph": {},
+                    "summary": {
+                        "total_vulnerabilities": 1,
+                        "by_type": {"COMMAND_INJECTION": 1},
+                        "by_guide_category": {"입력데이터 검증 및 표현": 1},
+                        "by_severity": {"CRITICAL": 1},
+                        "score": {"overall": 60, "by_file": {"CommandService.java": 60}},
+                    },
+                    "vulnerabilities": [
+                        {
+                            "id": "VULN-001",
+                            "type": "COMMAND_INJECTION",
+                            "severity": "CRITICAL",
+                            "cwe": "CWE-78",
+                            "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
+                            "guide_category": "입력데이터 검증 및 표현",
+                            "guide_item": "운영체제 명령어 삽입",
+                            "file": "CommandService.java",
+                            "line": 12,
+                            "function": "runCommand",
+                            "code_snippet": 'Runtime.getRuntime().exec(cmd);',
+                            "call_chain": ["CommandService.runCommand", "req → cmd → Runtime.exec(...)"],
+                            "evidence": "cmd 값이 Runtime.exec(...) 운영체제 명령 실행 지점에 전달되었습니다.",
+                            "description": DETECTOR_METADATA["COMMAND_INJECTION"].description,
+                            "recommendation": "ProcessBuilder에 허용된 인자를 분리해 전달하세요.",
+                            "safe_example": 'new ProcessBuilder("/usr/bin/id").start();',
+                            "confidence": "HIGH",
+                            "confidence_reason": "외부 입력 흐름이 확인되었습니다.",
+                        }
+                    ],
+                }
+            }
+
+    service = AnalysisService(
+        settings=get_settings(),
+        analyzer_service=FakeAnalyzerService(),  # type: ignore[arg-type]
+        result_store=AnalysisResultStore(),
+    )
+
+    response = service.analyze_uploaded_file("CommandService.java", java_bytes(), user_id=1)
+    finding = response["analysis_result"]["vulnerabilities"][0]
+
+    assert finding["finding_report_title"] == "runCommand에서 exec로 이어지는 OS 명령어 삽입"
+    assert "exec 명령 실행 흐름" in finding["description"]
+
+
 def test_analysis_result_precomputes_all_finding_markdown_reports() -> None:
     class FakeAnalyzerService:
         def analyze(self, target_path: str, repository: str = "") -> dict:

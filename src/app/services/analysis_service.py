@@ -808,7 +808,16 @@ class AnalysisService:
             return ""
         function = cls._compact_identifier(str(finding.get("function") or ""))
         for raw_step in reversed(call_chain):
-            step = cls._compact_identifier(str(raw_step or ""))
+            raw_text = str(raw_step or "")
+            invocation_matches = re.findall(
+                r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\(",
+                raw_text,
+            )
+            step = (
+                invocation_matches[-1].split(".")[-1]
+                if invocation_matches
+                else cls._compact_identifier(raw_text)
+            )
             if not step or step == function:
                 continue
             match = re.search(r"([A-Za-z_$][\w$]*)\s*(?:\(|$)", step)
