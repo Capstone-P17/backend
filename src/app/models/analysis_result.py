@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.app.db.base import Base
@@ -14,6 +14,7 @@ class AnalysisResult(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     analysis_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
     repository: Mapped[str | None] = mapped_column(String(255), nullable=True)
     target_path: Mapped[str | None] = mapped_column(Text, nullable=True)

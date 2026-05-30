@@ -95,3 +95,41 @@ def test_database_result_store_update_persists_owner_scoped_results(tmp_path) ->
     Base.metadata.create_all(bind=engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
     assert_update_contract(DatabaseAnalysisResultStore(SessionLocal))
+
+
+def assert_visibility_contract(store) -> None:
+    analysis_id = store.save(sample_result("shared", 7), user_id=21)
+
+    assert store.get(analysis_id, user_id=99) is None
+    assert store.set_visibility(analysis_id, is_public=True) == {
+        "analysis_id": analysis_id,
+        "owner_user_id": 21,
+        "is_public": True,
+    }
+    assert store.get(analysis_id, user_id=99)["analysis_result"]["repository"] == "shared"
+    public_summaries = store.list_results(user_id=99)
+    assert public_summaries[0]["analysis_id"] == analysis_id
+    assert public_summaries[0]["owner_user_id"] == 21
+    assert public_summaries[0]["is_public"] is True
+    latest_id, latest = store.get_latest(user_id=99)
+    assert latest_id == analysis_id
+    assert latest["analysis_result"]["repository"] == "shared"
+
+    assert store.set_visibility(analysis_id, is_public=False) == {
+        "analysis_id": analysis_id,
+        "owner_user_id": 21,
+        "is_public": False,
+    }
+    assert store.get(analysis_id, user_id=99) is None
+    assert store.set_visibility("missing", is_public=True) is None
+
+
+def test_in_memory_result_store_visibility_policy() -> None:
+    assert_visibility_contract(AnalysisResultStore())
+
+
+def test_database_result_store_visibility_policy(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'visibility.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+    assert_visibility_contract(DatabaseAnalysisResultStore(SessionLocal))

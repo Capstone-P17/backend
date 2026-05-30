@@ -190,6 +190,8 @@ class FindingDetailResponse(BaseModel):
 
 class AnalysisResultListItem(BaseModel):
     analysis_id: str
+    owner_user_id: int | None = None
+    is_public: bool = False
     repository: str
     target_path: str | None = None
     analyzed_at: str

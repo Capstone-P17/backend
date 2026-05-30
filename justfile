@@ -36,6 +36,18 @@ backend-shell:
 db-shell:
     docker compose exec db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
 
+# Make one analysis result visible to every authenticated user
+publish-analysis analysis_id:
+    if docker compose ps --services --filter status=running 2>/dev/null | grep -qx backend; then docker compose exec backend uv run python -m src.app.tools.set_analysis_visibility {{analysis_id}} public; else uv run python -m src.app.tools.set_analysis_visibility {{analysis_id}} public; fi
+
+# Restore one analysis result to owner-only visibility
+unpublish-analysis analysis_id:
+    if docker compose ps --services --filter status=running 2>/dev/null | grep -qx backend; then docker compose exec backend uv run python -m src.app.tools.set_analysis_visibility {{analysis_id}} private; else uv run python -m src.app.tools.set_analysis_visibility {{analysis_id}} private; fi
+
+# Set analysis visibility explicitly: `just analysis-visibility <analysis_id> public|private`
+analysis-visibility analysis_id visibility:
+    if docker compose ps --services --filter status=running 2>/dev/null | grep -qx backend; then docker compose exec backend uv run python -m src.app.tools.set_analysis_visibility {{analysis_id}} {{visibility}}; else uv run python -m src.app.tools.set_analysis_visibility {{analysis_id}} {{visibility}}; fi
+
 # Run the test suite locally
 test:
     uv run pytest

@@ -28,6 +28,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_analysis_results_user_id_column()
+    _ensure_analysis_results_is_public_column()
 
 
 def _ensure_analysis_results_user_id_column() -> None:
@@ -41,3 +42,19 @@ def _ensure_analysis_results_user_id_column() -> None:
 
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE analysis_results ADD COLUMN user_id INTEGER"))
+
+
+def _ensure_analysis_results_is_public_column() -> None:
+    inspector = inspect(engine)
+    if "analysis_results" not in inspector.get_table_names():
+        return
+
+    column_names = {column["name"] for column in inspector.get_columns("analysis_results")}
+    if "is_public" in column_names:
+        return
+
+    default = "0" if engine.dialect.name == "sqlite" else "FALSE"
+    with engine.begin() as connection:
+        connection.execute(
+            text(f"ALTER TABLE analysis_results ADD COLUMN is_public BOOLEAN NOT NULL DEFAULT {default}")
+        )

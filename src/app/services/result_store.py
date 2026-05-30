@@ -5,7 +5,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from loguru import logger
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
 from src.app.models.analysis_result import AnalysisResult as AnalysisResultModel
@@ -17,6 +17,7 @@ class AnalysisResultStore:
     def __init__(self) -> None:
         self._results: dict[str, dict[str, Any]] = {}
         self._owners: dict[str, int] = {}
+        self._public: set[str] = set()
         self._order: list[str] = []
         self._latest_analysis_id_by_user: dict[int, str] = {}
 
@@ -33,7 +34,7 @@ class AnalysisResultStore:
         return analysis_id
 
     def get(self, analysis_id: str, user_id: int) -> dict[str, Any] | None:
-        if self._owners.get(analysis_id) != user_id:
+        if self._owners.get(analysis_id) != user_id and analysis_id not in self._public:
             return None
         result = self._results.get(analysis_id)
         if result is None:
@@ -41,7 +42,13 @@ class AnalysisResultStore:
         return self._clone(result)
 
     def get_latest(self, user_id: int) -> tuple[str, dict[str, Any]] | None:
-        latest_analysis_id = self._latest_analysis_id_by_user.get(user_id)
+        visible_ids = [
+            analysis_id
+            for analysis_id in self._order
+            if analysis_id in self._results
+            and (self._owners.get(analysis_id) == user_id or analysis_id in self._public)
+        ]
+        latest_analysis_id = visible_ids[-1] if visible_ids else None
         if latest_analysis_id is None:
             return None
         latest = self.get(latest_analysis_id, user_id)
@@ -68,23 +75,51 @@ class AnalysisResultStore:
         matching_ids = [
             analysis_id
             for analysis_id in self._order
-            if analysis_id in self._results and self._owners.get(analysis_id) == user_id
+            if analysis_id in self._results
+            and (self._owners.get(analysis_id) == user_id or analysis_id in self._public)
         ]
         return [
-            self._build_summary_item(analysis_id, self._results[analysis_id])
+            self._build_summary_item(
+                analysis_id,
+                self._results[analysis_id],
+                owner_user_id=self._owners.get(analysis_id),
+                is_public=analysis_id in self._public,
+            )
             for analysis_id in reversed(matching_ids[-safe_limit:] if safe_limit else [])
         ]
+
+    def set_visibility(self, analysis_id: str, *, is_public: bool) -> dict[str, Any] | None:
+        if analysis_id not in self._results:
+            return None
+        if is_public:
+            self._public.add(analysis_id)
+        else:
+            self._public.discard(analysis_id)
+        return {
+            "analysis_id": analysis_id,
+            "owner_user_id": self._owners.get(analysis_id),
+            "is_public": analysis_id in self._public,
+        }
 
     @classmethod
     def _clone(cls, result: dict[str, Any]) -> dict[str, Any]:
         return deepcopy(result)
 
     @classmethod
-    def _build_summary_item(cls, analysis_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    def _build_summary_item(
+        cls,
+        analysis_id: str,
+        result: dict[str, Any],
+        *,
+        owner_user_id: int | None = None,
+        is_public: bool = False,
+    ) -> dict[str, Any]:
         analysis = result.get("analysis_result", {}) if isinstance(result, dict) else {}
         summary = analysis.get("summary", {}) if isinstance(analysis, dict) else {}
         return {
             "analysis_id": analysis_id,
+            "owner_user_id": owner_user_id,
+            "is_public": is_public,
             "repository": analysis.get("repository", "") if isinstance(analysis, dict) else "",
             "target_path": analysis.get("target_path") if isinstance(analysis, dict) else None,
             "analyzed_at": analysis.get("analyzed_at", "") if isinstance(analysis, dict) else "",
@@ -107,6 +142,7 @@ class DatabaseAnalysisResultStore:
         summary = analysis.get("summary", {}) if isinstance(analysis, dict) else {}
         record = AnalysisResultModel(
             user_id=user_id,
+            is_public=False,
             analysis_id=analysis_id,
             repository=analysis.get("repository") or None if isinstance(analysis, dict) else None,
             target_path=analysis.get("target_path") if isinstance(analysis, dict) else None,
@@ -129,7 +165,10 @@ class DatabaseAnalysisResultStore:
             record = session.scalar(
                 select(AnalysisResultModel).where(
                     AnalysisResultModel.analysis_id == analysis_id,
-                    AnalysisResultModel.user_id == user_id,
+                    or_(
+                        AnalysisResultModel.user_id == user_id,
+                        AnalysisResultModel.is_public.is_(True),
+                    ),
                 )
             )
             if record is None:
@@ -148,7 +187,12 @@ class DatabaseAnalysisResultStore:
         with self._session_factory() as session:
             record = session.scalar(
                 select(AnalysisResultModel)
-                .where(AnalysisResultModel.user_id == user_id)
+                .where(
+                    or_(
+                        AnalysisResultModel.user_id == user_id,
+                        AnalysisResultModel.is_public.is_(True),
+                    )
+                )
                 .order_by(
                     desc(AnalysisResultModel.created_at),
                     desc(AnalysisResultModel.id),
@@ -156,10 +200,7 @@ class DatabaseAnalysisResultStore:
                 .limit(1)
             )
             if record is None:
-                logger.bind(component="result_store.db", user_id=user_id, analysis_id=analysis_id).warning(
-                    "analysis_result_update_miss analysis_id={}",
-                    analysis_id,
-                )
+                logger.bind(component="result_store.db", user_id=user_id).debug("analysis_result_latest_miss")
                 return None
             return record.analysis_id, deepcopy(record.result_json)
 
@@ -198,7 +239,12 @@ class DatabaseAnalysisResultStore:
         with self._session_factory() as session:
             records = session.scalars(
                 select(AnalysisResultModel)
-                .where(AnalysisResultModel.user_id == user_id)
+                .where(
+                    or_(
+                        AnalysisResultModel.user_id == user_id,
+                        AnalysisResultModel.is_public.is_(True),
+                    )
+                )
                 .order_by(
                     desc(AnalysisResultModel.created_at),
                     desc(AnalysisResultModel.id),
@@ -207,6 +253,27 @@ class DatabaseAnalysisResultStore:
             ).all()
             return [self._build_summary_item(record) for record in records]
 
+    def set_visibility(self, analysis_id: str, *, is_public: bool) -> dict[str, Any] | None:
+        with self._session_factory() as session:
+            record = session.scalar(
+                select(AnalysisResultModel).where(AnalysisResultModel.analysis_id == analysis_id)
+            )
+            if record is None:
+                return None
+            record.is_public = is_public
+            session.commit()
+            logger.bind(
+                component="result_store.db",
+                analysis_id=analysis_id,
+                owner_user_id=record.user_id,
+                is_public=is_public,
+            ).info("analysis_result_visibility_updated analysis_id={}", analysis_id)
+            return {
+                "analysis_id": record.analysis_id,
+                "owner_user_id": record.user_id,
+                "is_public": record.is_public,
+            }
+
     @staticmethod
     def _build_summary_item(record: AnalysisResultModel) -> dict[str, Any]:
         result = record.result_json or {}
@@ -214,6 +281,8 @@ class DatabaseAnalysisResultStore:
         summary = analysis.get("summary", {}) if isinstance(analysis, dict) else {}
         return {
             "analysis_id": record.analysis_id,
+            "owner_user_id": record.user_id,
+            "is_public": record.is_public,
             "repository": record.repository or "",
             "target_path": record.target_path,
             "analyzed_at": analysis.get("analyzed_at", "") if isinstance(analysis, dict) else "",
