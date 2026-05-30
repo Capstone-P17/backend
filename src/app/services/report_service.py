@@ -4,6 +4,7 @@ from datetime import datetime
 from html import escape
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import Any
 
 from reportlab.lib import colors
@@ -380,8 +381,25 @@ class ReportService:
         llm_report: str,
         styles: dict[str, ParagraphStyle],
     ) -> None:
+        in_code_block = False
+        code_lines: list[str] = []
+
         for raw_line in llm_report.splitlines():
             line = raw_line.strip()
+            if line.startswith("```"):
+                if in_code_block:
+                    story.append(self._build_code_block("\n".join(code_lines).strip("\n")))
+                    code_lines = []
+                    in_code_block = False
+                else:
+                    in_code_block = True
+                    code_lines = []
+                continue
+
+            if in_code_block:
+                code_lines.append(raw_line.rstrip("\n"))
+                continue
+
             if not line:
                 story.append(Spacer(1, 1.5 * mm))
                 continue
@@ -394,13 +412,16 @@ class ReportService:
             if line.startswith("# "):
                 story.append(Paragraph(self._paragraphify(line[2:]), styles["heading"]))
                 continue
-            if line[:2].isdigit() and line[1:3] == ". ":
+            if re.match(r"^\d+\.\s+", line):
                 story.append(Paragraph(self._paragraphify(line), styles["subheading"]))
                 continue
             if line.startswith(("- ", "* ")):
                 story.append(Paragraph(self._paragraphify(f"• {line[2:]}"), styles["bullet"]))
                 continue
             story.append(Paragraph(self._paragraphify(line), styles["body"]))
+
+        if in_code_block and code_lines:
+            story.append(self._build_code_block("\n".join(code_lines).strip("\n")))
 
     def _append_finding_sections(
         self,
@@ -440,6 +461,13 @@ class ReportService:
             story.append(KeepTogether(lead_block))
             story.append(Spacer(1, 1.5 * mm))
 
+            markdown_report = self._finding_markdown_report_text(finding)
+            if markdown_report:
+                story.append(Paragraph("상세 Markdown 보고서", styles["subheading"]))
+                self._append_markdownish_report(story, markdown_report, styles)
+                story.append(Spacer(1, 2 * mm))
+                continue
+
             fix_method = self._build_fix_method_text(finding)
             if fix_method:
                 story.append(Paragraph("수정 방법", styles["subheading"]))
@@ -465,6 +493,21 @@ class ReportService:
                 story.append(Spacer(1, 1.2 * mm))
 
             story.append(Spacer(1, 2 * mm))
+
+    @staticmethod
+    def _finding_markdown_report_text(finding: dict[str, Any]) -> str:
+        report = finding.get("finding_report")
+        if not isinstance(report, dict):
+            return ""
+
+        markdown = str(report.get("markdown") or "").strip()
+        if not markdown:
+            return ""
+
+        status = str(report.get("status") or finding.get("finding_report_status") or "").strip()
+        if status in {"failed", "unavailable", "skipped_context_budget_exceeded"}:
+            return ""
+        return markdown
 
     def _build_finding_metadata_rows(
         self,

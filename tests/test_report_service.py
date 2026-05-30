@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 from reportlab.platypus import PageBreakIfNotEmpty
 
 from src.app.core.config import get_settings
@@ -256,6 +258,40 @@ def test_report_service_prefers_how_to_fix_and_falls_back_to_recommendation() ->
         service._build_fix_method_text(finding)
         == "PreparedStatement와 바인딩 파라미터를 사용하고, SQL 문자열에 사용자 입력을 직접 연결하지 마세요."
     )
+
+
+def test_report_service_renders_stored_finding_markdown_before_static_fallback_sections() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+    analysis = deepcopy(_sample_analysis_result())
+    finding = analysis["vulnerabilities"][0]
+    finding["evidence"] = "STATIC_ONLY_EVIDENCE_SHOULD_NOT_RENDER"
+    finding["finding_report"] = {
+        "status": "generated",
+        "markdown": (
+            "# 요약\n"
+            "생성된 finding markdown 본문입니다.\n"
+            "# 수정 예시\n"
+            "```diff\n"
+            "- Statement 사용\n"
+            "+ PreparedStatement 사용\n"
+            "```\n"
+        ),
+    }
+    story: list[object] = []
+
+    service._append_finding_sections(story, analysis, [finding], service._build_styles())
+
+    paragraph_text = "\n".join(
+        flowable.getPlainText()
+        for flowable in story
+        if hasattr(flowable, "getPlainText")
+    )
+    assert "상세 Markdown 보고서" in paragraph_text
+    assert "생성된 finding markdown 본문입니다." in paragraph_text
+    assert "STATIC_ONLY_EVIDENCE_SHOULD_NOT_RENDER" not in paragraph_text
 
 
 def test_report_service_sorts_findings_like_analysis_ui() -> None:
