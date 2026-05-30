@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from reportlab.platypus import PageBreakIfNotEmpty
+
 from src.app.core.config import get_settings
 from src.app.services.report_service import ReportService
 
@@ -279,3 +281,15 @@ def test_report_service_sorts_findings_like_analysis_ui() -> None:
         "high-a",
         "low-z",
     ]
+
+
+def test_report_service_uses_non_empty_page_breaks_for_pdf_sections() -> None:
+    service = ReportService(
+        settings=get_settings(),
+        analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
+    )
+
+    story = service._build_story(_sample_analysis_result())
+    page_breaks = [flowable for flowable in story if isinstance(flowable, PageBreakIfNotEmpty)]
+
+    assert len(page_breaks) >= 2

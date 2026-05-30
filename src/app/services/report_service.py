@@ -13,7 +13,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.pdfmetrics import registerFont
-from reportlab.platypus import CondPageBreak, KeepTogether, PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import CondPageBreak, KeepTogether, PageBreakIfNotEmpty, Paragraph, Preformatted, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from src.app.core.config import Settings
 from src.app.services.analysis_service import AnalysisResultNotFoundError, AnalysisService
@@ -107,7 +107,7 @@ class ReportService:
         story.append(Paragraph("3. 취약점 목록", styles["heading"]))
         self._append_finding_sections(story, analysis, findings, styles)
 
-        story.append(PageBreak())
+        story.append(PageBreakIfNotEmpty())
         story.append(Paragraph("4. 취약점 파일 목록", styles["heading"]))
         story.append(self._build_file_summary_table(findings, styles))
 
@@ -417,7 +417,7 @@ class ReportService:
             if not isinstance(finding, dict):
                 continue
             if index > 1:
-                story.append(PageBreak())
+                story.append(PageBreakIfNotEmpty())
             title = str(finding.get("finding_report_title") or finding.get("type") or "취약점")
             lead_block: list[Any] = [Paragraph(self._paragraphify(f"3.{index} {title}"), styles["subheading"])]
 
