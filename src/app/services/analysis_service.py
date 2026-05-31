@@ -514,12 +514,9 @@ class AnalysisService:
                         file_score = raw_score
 
         by_type: dict[str, int] = {}
-        by_severity: dict[str, int] = {}
         for finding in matched_findings:
             finding_type = str(finding.get("type", "UNKNOWN"))
-            finding_severity = str(finding.get("severity", "UNKNOWN"))
             by_type[finding_type] = by_type.get(finding_type, 0) + 1
-            by_severity[finding_severity] = by_severity.get(finding_severity, 0) + 1
 
         return {
             "analysis_id": analysis_id,
@@ -531,7 +528,6 @@ class AnalysisService:
             "summary": {
                 "total_vulnerabilities": len(matched_findings),
                 "by_type": by_type,
-                "by_severity": by_severity,
                 "score": file_score,
             },
         }
@@ -830,10 +826,9 @@ class AnalysisService:
             finding_id = self._finding_identifier(finding)
             report_started = time.perf_counter()
             logger.bind(component="analysis.finding_report", finding_id=finding_id).debug(
-                "finding_report_generation_started finding_id={} type={} severity={}",
+                "finding_report_generation_started finding_id={} type={}",
                 finding_id,
                 finding.get("type", "UNKNOWN"),
-                finding.get("severity", "UNKNOWN"),
             )
             finding["finding_report"] = self._generate_finding_markdown_report(
                 finding=finding,

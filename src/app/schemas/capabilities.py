@@ -5,8 +5,6 @@ from pydantic import BaseModel, Field
 
 class DetectorCapability(BaseModel):
     type: str
-    cwe: str
-    severity: str
     description: str
 
 

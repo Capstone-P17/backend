@@ -54,12 +54,6 @@ def _sample_analysis_result() -> dict[str, object]:
                 "입력데이터 검증 및 표현": 13,
                 "보안기능": 3,
             },
-            "by_severity": {
-                "CRITICAL": 12,
-                "HIGH": 1,
-                "MEDIUM": 3,
-                "LOW": 0,
-            },
             "score": {
                 "overall": 84,
                 "by_file": {},
@@ -69,12 +63,9 @@ def _sample_analysis_result() -> dict[str, object]:
             {
                 "id": "VULN-001",
                 "type": "SQL_INJECTION",
-                "severity": "CRITICAL",
-                "cwe": "CWE-89",
                 "file": "app/src/main/java/com/veracode/verademo/commands/IgnoreCommand.java",
                 "line": 37,
                 "function": "execute",
-                "cvss": {"score": 9.8, "vector": "CVSS:3.1/AV:N/AC:L"},
                 "confidence": "HIGH",
                 "guide_category": "입력데이터 검증 및 표현",
                 "guide_item": "SQL 삽입",
@@ -101,12 +92,9 @@ def _sample_analysis_result() -> dict[str, object]:
             {
                 "id": "VULN-002",
                 "type": "SQL_INJECTION",
-                "severity": "CRITICAL",
-                "cwe": "CWE-89",
                 "file": "app/src/main/java/com/veracode/verademo/commands/IgnoreCommand.java",
                 "line": 45,
                 "function": "execute",
-                "cvss": {"score": 9.8, "vector": "CVSS:3.1/AV:N/AC:L"},
                 "confidence": "HIGH",
                 "guide_category": "입력데이터 검증 및 표현",
                 "guide_item": "SQL 삽입",
@@ -124,12 +112,9 @@ def _sample_analysis_result() -> dict[str, object]:
             {
                 "id": "VULN-003",
                 "type": "WEAK_HASH",
-                "severity": "MEDIUM",
-                "cwe": "CWE-328",
                 "file": "app/src/main/java/com/veracode/verademo/utils/User.java",
                 "line": 103,
                 "function": "md5",
-                "cvss": {"score": 5.9, "vector": "CVSS:3.1/AV:N/AC:H"},
                 "confidence": "HIGH",
                 "guide_category": "보안기능",
                 "guide_item": "취약한 해시 알고리즘 사용",
@@ -183,7 +168,7 @@ def test_report_service_overview_rows_format_timestamp_and_exclude_removed_field
     assert not any(label == "리포트 상태" for label, _ in rows)
 
 
-def test_report_service_file_summary_rows_aggregate_lines_and_severity() -> None:
+def test_report_service_file_summary_rows_aggregate_lines() -> None:
     service = ReportService(
         settings=get_settings(),
         analysis_service=_FakeAnalysisService(_sample_analysis_result()),  # type: ignore[arg-type]
@@ -196,13 +181,11 @@ def test_report_service_file_summary_rows_aggregate_lines_and_severity() -> None
             "verademo/commands/IgnoreCommand.java",
             "2",
             "37, 45",
-            "치명적",
         ],
         [
             "verademo/utils/User.java",
             "1",
             "103",
-            "경고",
         ],
     ]
 
@@ -350,21 +333,21 @@ def test_report_service_sorts_findings_like_analysis_ui() -> None:
     )
 
     findings = [
-        {"id": "low-z", "severity": "LOW", "file": "b/File.java", "line": 5, "type": "WEAK_HASH"},
-        {"id": "critical-b", "severity": "CRITICAL", "file": "b/File.java", "line": 40, "type": "SQL_INJECTION"},
-        {"id": "critical-a", "severity": "CRITICAL", "file": "a/File.java", "line": 50, "type": "SQL_INJECTION"},
-        {"id": "critical-a-early", "severity": "CRITICAL", "file": "a/File.java", "line": 10, "type": "SQL_INJECTION"},
-        {"id": "high-a", "severity": "HIGH", "file": "a/File.java", "line": 10, "type": "XSS"},
+        {"id": "z-file", "file": "b/File.java", "line": 5, "type": "WEAK_HASH"},
+        {"id": "b-late", "file": "b/File.java", "line": 40, "type": "SQL_INJECTION"},
+        {"id": "a-late", "file": "a/File.java", "line": 50, "type": "SQL_INJECTION"},
+        {"id": "a-early-sql", "file": "a/File.java", "line": 10, "type": "SQL_INJECTION"},
+        {"id": "a-early-xss", "file": "a/File.java", "line": 10, "type": "XSS"},
     ]
 
     ordered = service._sort_findings_for_report(findings)
 
     assert [finding["id"] for finding in ordered] == [
-        "critical-a-early",
-        "critical-a",
-        "critical-b",
-        "high-a",
-        "low-z",
+        "a-early-sql",
+        "a-early-xss",
+        "a-late",
+        "z-file",
+        "b-late",
     ]
 
 

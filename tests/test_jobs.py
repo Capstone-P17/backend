@@ -15,7 +15,6 @@ def fake_analysis_response() -> dict:
             "summary": {
                 "total_vulnerabilities": 0,
                 "by_type": {},
-                "by_severity": {},
                 "score": {"overall": 100, "by_file": {}},
             },
         },

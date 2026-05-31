@@ -20,12 +20,6 @@ from src.app.core.config import Settings
 from src.app.services.analysis_service import AnalysisResultNotFoundError, AnalysisService
 
 _PDF_FONT_NAME = "HYGothic-Medium"
-_SEVERITY_LABELS = {
-    "CRITICAL": "치명적",
-    "HIGH": "위험",
-    "MEDIUM": "경고",
-    "LOW": "보통",
-}
 _FINDING_STATUS_LABELS = {
     "generated": "생성됨",
     "static_fallback": "정적 대체",
@@ -337,7 +331,6 @@ class ReportService:
 
     def _build_overview_rows(self, analysis: dict[str, Any]) -> list[list[str]]:
         summary = analysis.get("summary", {})
-        by_severity = summary.get("by_severity", {}) if isinstance(summary, dict) else {}
         findings = analysis.get("vulnerabilities", [])
         impacted_files = self._count_impacted_files(findings)
 
@@ -347,7 +340,6 @@ class ReportService:
             ["분석 파일 수", str(analysis.get("files_analyzed", 0))],
             ["발견된 취약점", str(summary.get("total_vulnerabilities", 0) if isinstance(summary, dict) else 0)],
             ["영향 파일 수", str(impacted_files)],
-            ["심각도 분포", self._format_distribution(by_severity, _SEVERITY_LABELS)],
         ]
 
     def _append_distribution_summary(
@@ -542,25 +534,13 @@ class ReportService:
         finding: dict[str, Any],
         analysis: dict[str, Any],
     ) -> list[list[str]]:
-        cvss = finding.get("cvss")
-        cvss_text = "-"
-        if isinstance(cvss, dict):
-            score = cvss.get("score")
-            vector = str(cvss.get("vector") or "").strip()
-            score_text = str(score) if score is not None else "-"
-            cvss_text = score_text if not vector else f"{score_text} ({vector})"
-
         file_path = str(finding.get("file") or "-")
         line = finding.get("line")
         file_line = self._format_file_line(file_path, line)
-        confidence = str(finding.get("confidence") or "-")
-        cwe = str(finding.get("cwe") or "-")
 
         return [
-            ["심각도", self._severity_label(str(finding.get("severity") or ""))],
             ["파일 / 라인", file_line],
             ["함수", str(finding.get("function") or "-")],
-            ["CWE / CVSS / 신뢰도", f"{cwe} / {cvss_text} / {confidence}"],
             ["가이드 분류", self._build_guide_path(finding)],
         ]
 
@@ -631,7 +611,6 @@ class ReportService:
             Paragraph("파일명", styles["table"]),
             Paragraph("취약점", styles["table"]),
             Paragraph("탐지 라인", styles["table"]),
-            Paragraph("위험도", styles["table"]),
         ]
         rows: list[list[Any]] = [header]
 
@@ -645,13 +624,12 @@ class ReportService:
                     Paragraph("취약점 없음", styles["table"]),
                     Paragraph("-", styles["table"]),
                     Paragraph("-", styles["table"]),
-                    Paragraph("-", styles["table"]),
                 ]
             )
 
         table = Table(
             rows,
-            colWidths=[89 * mm, 18 * mm, 40 * mm, 16 * mm],
+            colWidths=[101 * mm, 22 * mm, 40 * mm],
             repeatRows=1,
             hAlign="LEFT",
         )
@@ -690,7 +668,6 @@ class ReportService:
             line = finding.get("line")
             if isinstance(line, int):
                 bucket["lines"].append(line)
-            bucket["severities"].append(str(finding.get("severity") or ""))
 
         rows: list[list[str]] = []
         for file_path, values in aggregated.items():
@@ -703,7 +680,6 @@ class ReportService:
                     self._compact_path_for_pdf(file_path, depth=3),
                     str(values["count"]),
                     line_preview or "-",
-                    self._highest_severity_label(values["severities"]),
                 ]
             )
         return rows
@@ -714,14 +690,12 @@ class ReportService:
 
         normalized = [finding for finding in findings if isinstance(finding, dict)]
 
-        def sort_key(finding: dict[str, Any]) -> tuple[int, str, int, str]:
-            severity_order = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
-            severity = str(finding.get("severity") or "").upper()
+        def sort_key(finding: dict[str, Any]) -> tuple[str, int, str]:
             file_path = str(finding.get("file") or "")
             line = finding.get("line")
             line_number = line if isinstance(line, int) else 10**9
             finding_type = str(finding.get("type") or "")
-            return (-severity_order.get(severity, 0), file_path, line_number, finding_type)
+            return (file_path, line_number, finding_type)
 
         return sorted(normalized, key=sort_key)
 
@@ -850,12 +824,3 @@ class ReportService:
         category = str(finding.get("guide_category") or "").strip()
         item = str(finding.get("guide_item") or "").strip()
         return ReportService._join_non_empty([category, item], " > ") or "-"
-
-    @staticmethod
-    def _severity_label(severity: str) -> str:
-        return _SEVERITY_LABELS.get(severity, severity or "-")
-
-    def _highest_severity_label(self, severities: list[str]) -> str:
-        order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-        best = min(severities, key=lambda severity: order.get(severity, 99), default="")
-        return self._severity_label(best)

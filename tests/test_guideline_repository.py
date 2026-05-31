@@ -10,7 +10,6 @@ def test_guideline_repository_maps_detector_type_to_reference() -> None:
     refs = repository.find_for_finding(
         {
             "type": "SQL_INJECTION",
-            "cwe": "CWE-89",
             "guide_category": "입력데이터 검증 및 표현",
             "guide_item": "SQL 삽입",
         }

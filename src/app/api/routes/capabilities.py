@@ -17,8 +17,6 @@ def get_capabilities() -> CapabilitiesResponse:
         detectors=[
             DetectorCapability(
                 type=vulnerability_type,
-                cwe=metadata.cwe,
-                severity=metadata.severity,
                 description=metadata.description,
             )
             for vulnerability_type, metadata in DETECTOR_METADATA.items()

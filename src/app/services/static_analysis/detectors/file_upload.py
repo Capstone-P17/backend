@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 
@@ -21,7 +20,6 @@ WEB_ROOT_TOKENS = (
 def detect_dangerous_file_upload(filepath, tree, vuln_counter):
     """Detect uploads stored without sufficient server-side validation.
 
-    CWE-434 is only meaningful when an uploaded file reaches a persistence API.
     This detector therefore looks for upload objects flowing into common Java
     storage sinks and suppresses findings only when enough controls are visible:
     extension allowlist, file signature validation, size limit, regenerated file
@@ -426,8 +424,6 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
                 {
                     "id": f"VULN-{vuln_counter[0]:03d}",
                     "type": "DANGEROUS_FILE_UPLOAD",
-                    "severity": "HIGH",
-                    "cvss": get_cvss("DANGEROUS_FILE_UPLOAD", "HIGH"),
                     "file": filepath,
                     "line": sink_node.start_point[0] + 1,
                     "function": method_name,

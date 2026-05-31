@@ -126,7 +126,6 @@ class AnalysisResultStore:
             "language": analysis.get("language", "java") if isinstance(analysis, dict) else "java",
             "files_analyzed": analysis.get("files_analyzed", 0) if isinstance(analysis, dict) else 0,
             "total_vulnerabilities": summary.get("total_vulnerabilities", 0) if isinstance(summary, dict) else 0,
-            "severity_counts": dict(summary.get("by_severity", {})) if isinstance(summary, dict) else {},
         }
 
 
@@ -289,5 +288,4 @@ class DatabaseAnalysisResultStore:
             "language": record.language,
             "files_analyzed": record.files_analyzed,
             "total_vulnerabilities": record.total_vulnerabilities,
-            "severity_counts": dict(summary.get("by_severity", {})) if isinstance(summary, dict) else {},
         }

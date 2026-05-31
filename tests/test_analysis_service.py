@@ -93,15 +93,12 @@ def test_github_repository_attaches_blob_source_links(monkeypatch) -> None:
                         "total_vulnerabilities": 1,
                         "by_type": {"SQL_INJECTION": 1},
                         "by_guide_category": {},
-                        "by_severity": {"HIGH": 1},
                         "score": {"overall": 90, "by_file": {"src/Login.java": 90}},
                     },
                     "vulnerabilities": [
                         {
                             "id": "VULN-001",
                             "type": "SQL_INJECTION",
-                            "severity": "HIGH",
-                            "cwe": "CWE-89",
                             "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
                             "guide_category": "입력데이터 검증 및 표현",
                             "guide_item": "SQL 삽입",
@@ -172,15 +169,12 @@ def test_analysis_result_generates_contextual_finding_title_and_description() ->
                         "total_vulnerabilities": 1,
                         "by_type": {"SQL_INJECTION": 1},
                         "by_guide_category": {"입력데이터 검증 및 표현": 1},
-                        "by_severity": {"HIGH": 1},
                         "score": {"overall": 90, "by_file": {"LoginService.java": 90}},
                     },
                     "vulnerabilities": [
                         {
                             "id": "VULN-001",
                             "type": "SQL_INJECTION",
-                            "severity": "HIGH",
-                            "cwe": "CWE-89",
                             "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
                             "guide_category": "입력데이터 검증 및 표현",
                             "guide_item": "SQL 삽입",
@@ -241,15 +235,12 @@ def test_analysis_result_extracts_sink_from_call_chain_with_ellipsis() -> None:
                         "total_vulnerabilities": 1,
                         "by_type": {"COMMAND_INJECTION": 1},
                         "by_guide_category": {"입력데이터 검증 및 표현": 1},
-                        "by_severity": {"CRITICAL": 1},
                         "score": {"overall": 60, "by_file": {"CommandService.java": 60}},
                     },
                     "vulnerabilities": [
                         {
                             "id": "VULN-001",
                             "type": "COMMAND_INJECTION",
-                            "severity": "CRITICAL",
-                            "cwe": "CWE-78",
                             "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
                             "guide_category": "입력데이터 검증 및 표현",
                             "guide_item": "운영체제 명령어 삽입",
@@ -291,8 +282,6 @@ def test_analysis_result_precomputes_all_finding_markdown_reports() -> None:
                     {
                         "id": f"VULN-{index:03d}",
                         "type": "SQL_INJECTION",
-                        "severity": "HIGH",
-                        "cwe": "CWE-89",
                         "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
                         "guide_category": "입력데이터 검증 및 표현",
                         "guide_item": "SQL 삽입",
@@ -321,7 +310,6 @@ def test_analysis_result_precomputes_all_finding_markdown_reports() -> None:
                         "total_vulnerabilities": 2,
                         "by_type": {"SQL_INJECTION": 2},
                         "by_guide_category": {"입력데이터 검증 및 표현": 2},
-                        "by_severity": {"HIGH": 2},
                         "score": {"overall": 90, "by_file": {"LoginService.java": 90}},
                     },
                     "vulnerabilities": vulnerabilities,
@@ -344,7 +332,6 @@ def test_analysis_result_precomputes_all_finding_markdown_reports() -> None:
                 "proposed_patch": None,
                 "metadata": {
                     "title": finding["finding_report_title"],
-                    "severity_label": finding["severity"],
                     "generated_at": "2026-01-01T00:00:00+00:00",
                     "model": "fake-model",
                     "prompt_chars": 1,
@@ -418,15 +405,12 @@ def test_analysis_result_attaches_finding_explanations_before_llm_report() -> No
                         "total_vulnerabilities": 1,
                         "by_type": {"SQL_INJECTION": 1},
                         "by_guide_category": {"입력데이터 검증 및 표현": 1},
-                        "by_severity": {"HIGH": 1},
                         "score": {"overall": 90, "by_file": {"Unsafe.java": 90}},
                     },
                     "vulnerabilities": [
                         {
                             "id": "VULN-001",
                             "type": "SQL_INJECTION",
-                            "severity": "HIGH",
-                            "cwe": "CWE-89",
                             "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
                             "guide_category": "입력데이터 검증 및 표현",
                             "guide_item": "SQL 삽입",
@@ -499,15 +483,12 @@ def test_analysis_result_attaches_guideline_references_before_storage() -> None:
                         "total_vulnerabilities": 1,
                         "by_type": {"SQL_INJECTION": 1},
                         "by_guide_category": {"입력데이터 검증 및 표현": 1},
-                        "by_severity": {"HIGH": 1},
                         "score": {"overall": 90, "by_file": {"Unsafe.java": 90}},
                     },
                     "vulnerabilities": [
                         {
                             "id": "VULN-001",
                             "type": "SQL_INJECTION",
-                            "severity": "HIGH",
-                            "cwe": "CWE-89",
                             "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
                             "guide_category": "입력데이터 검증 및 표현",
                             "guide_item": "SQL 삽입",
@@ -561,15 +542,12 @@ def test_analysis_result_keeps_unmapped_findings_as_needs_review() -> None:
                         "total_vulnerabilities": 1,
                         "by_type": {"UNKNOWN_STATIC_FINDING": 1},
                         "by_guide_category": {},
-                        "by_severity": {"LOW": 1},
                         "score": {"overall": 95, "by_file": {"Unknown.java": 95}},
                     },
                     "vulnerabilities": [
                         {
                             "id": "VULN-999",
                             "type": "UNKNOWN_STATIC_FINDING",
-                            "severity": "LOW",
-                            "cwe": "CWE-000",
                             "guide_source": "",
                             "guide_category": "",
                             "guide_item": "",
@@ -618,11 +596,10 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
                 "files_analyzed": 1,
                 "summary": {"total_vulnerabilities": 1},
                 "call_graph": {"A.run": ["B.exec"]},
-                "vulnerabilities": [
-                    {
-                        "type": "SQL_INJECTION",
-                        "severity": "HIGH",
-                        "file": "src/LoginService.java",
+                    "vulnerabilities": [
+                        {
+                            "type": "SQL_INJECTION",
+                            "file": "src/LoginService.java",
                         "line": 12,
                         "function": "authenticate",
                         "description": "사용자 입력이 그대로 SQL에 연결됩니다.",
@@ -666,7 +643,6 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
     assert payload["vulnerabilities"][0] == {
         "id": None,
         "type": "SQL_INJECTION",
-        "severity": "HIGH",
         "file": "src/LoginService.java",
         "line": 12,
         "function": "authenticate",
@@ -699,11 +675,10 @@ def test_llm_report_payload_uses_report_friendly_vulnerability_fields() -> None:
             "id": "kr-sw-security-guide-2019-sql-injection",
             "source": "소프트웨어 보안약점 진단가이드",
             "version": "2019.6 개정",
-            "section": "입력데이터 검증 및 표현 - SQL 삽입",
-            "pages": [178, 191],
-            "detector_types": [],
-            "cwe": [],
-            "allowed_citations": [
+                "section": "입력데이터 검증 및 표현 - SQL 삽입",
+                "pages": [178, 191],
+                "detector_types": [],
+                "allowed_citations": [
                 {
                     "source": "소프트웨어 보안약점 진단가이드",
                     "version": "2019.6 개정",

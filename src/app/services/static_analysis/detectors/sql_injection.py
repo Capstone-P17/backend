@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
-from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import (
     find_parent_class,
     find_parent_method,
@@ -14,22 +13,6 @@ SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS
 SQL_KEYWORDS = ["SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE"]
 INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
 SQL_BUILDER_METHODS = ["format", "formatted", "concat"]
-
-# 인증 우회 가능성 → CRITICAL
-AUTH_KEYWORDS = ["USERNAME", "PASSWORD", "PASSWD", "LOGIN", "AUTH"]
-# 데이터 파괴 가능성 → CRITICAL
-DESTRUCTIVE_KEYWORDS = ["DELETE", "DROP", "UPDATE"]
-
-
-def _determine_severity(code_text: str) -> str:
-    """쿼리 코드 컨텍스트로 severity 결정."""
-    upper = code_text.upper()
-    if any(kw in upper for kw in AUTH_KEYWORDS):
-        return "CRITICAL"
-    if any(kw in upper for kw in DESTRUCTIVE_KEYWORDS):
-        return "CRITICAL"
-    return "HIGH"
-
 
 def detect_sql_injection(filepath, tree, vuln_counter):
     vulnerabilities = []
@@ -246,19 +229,16 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                 source = "메서드 파라미터 또는 외부 입력으로 추정되는 값"
             sql_step = f"SQL 변수 `{sql_var}` 생성" if sql_var else "SQL 문자열 직접 생성"
             return (
-                f"{source}, {sql_step}, `{sink}` 실행 API가 같은 메서드 흐름에서 확인되어 HIGH로 판단했습니다. "
+                f"{source}, {sql_step}, `{sink}` 실행 API가 같은 메서드 흐름에서 확인되었습니다. "
                 "정적 분석 범위에서 PreparedStatement 바인딩으로 분리되는 방어 흐름은 확인되지 않았습니다."
             )
 
         def add_finding(node, line, code, call_chain, evidence, confidence_reason):
-            severity = _determine_severity(code)
             vuln_counter[0] += 1
             vulnerabilities.append(
                 {
                     "id": f"VULN-{vuln_counter[0]:03d}",
                     "type": "SQL_INJECTION",
-                    "severity": severity,
-                    "cvss": get_cvss("SQL_INJECTION", severity),
                     "file": filepath,
                     "line": line,
                     "function": find_parent_method(node),

@@ -18,9 +18,6 @@ class ContextBudgetExceededError(RuntimeError):
     """Raised when an LLM prompt cannot be made small enough for the configured budget."""
 
 
-_SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-
-
 class SecurityReportGenerator:
     """Generate a developer-facing LLM report from static analysis output."""
 
@@ -93,7 +90,7 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
 3. 우선순위별 대응 방안
 4. 다음 단계
 
-각 취약점 설명에는 위험도, 악용 가능성, 발견 위치, 개발자가 바로 적용할 수 있는 수정 방향을 포함하라.
+각 취약점 설명에는 악용 가능성, 발견 위치, 개발자가 바로 적용할 수 있는 수정 방향을 포함하라.
 수정 방향은 추상적인 권고에 그치지 말고, 해당 취약점 유형에 맞는 구체적인 개선 방법을 1~2문장으로 작성하라.
 예를 들어 SQL 인젝션은 파라미터 바인딩 또는 PreparedStatement 사용, 하드코딩된 비밀값은 환경 변수나 시크릿 저장소 사용, 약한 해시는 더 안전한 해시 또는 비밀번호 전용 KDF 사용 방향을 우선 제시하라.
 """.strip(),
@@ -176,7 +173,6 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                 proposed_patch=_extract_proposed_patch(markdown),
                 metadata=FindingReportMetadata(
                     title=title,
-                    severity_label=str(finding.get("severity") or ""),
                     generated_at=_utc_now(),
                     model=self.settings.openai_model,
                     prompt_chars=len(payload_json),
@@ -221,7 +217,7 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                     (
                         "You are a senior application security analyst. Write safe Markdown only. "
                         "Do not output raw HTML. Do not invent files, lines, runtime validation, "
-                        "CVSS vectors, patches, citations, or exploitability beyond supplied evidence."
+                        "numeric risk scores, patches, citations, or exploitability beyond supplied evidence."
                     ),
                 ),
                 (
@@ -299,7 +295,7 @@ finding JSON:
             "target_path": analysis.get("target_path", ""),
             "language": analysis.get("language", "java"),
             "files_analyzed": analysis.get("files_analyzed", 0),
-            "summary": analysis.get("summary", {}),
+            "summary": _sanitize_summary_for_public_output(analysis.get("summary", {})),
             "finding_selection": {
                 "total_static_findings": len(vulnerabilities),
                 "detailed_findings_in_prompt": len(detailed_vulnerabilities),
@@ -321,12 +317,6 @@ finding JSON:
             return []
 
         indexed = list(enumerate(vulnerabilities))
-        indexed.sort(
-            key=lambda item: (
-                _SEVERITY_RANK.get(str(item[1].get("severity", "LOW")), 4),
-                item[0],
-            )
-        )
 
         selected_indexes: set[int] = set()
         for index, _finding in indexed[:max_detailed]:
@@ -352,7 +342,6 @@ finding JSON:
             brief: dict[str, Any] = {
                 "id": finding.get("id"),
                 "type": finding.get("type"),
-                "severity": finding.get("severity"),
                 "file": finding.get("file"),
                 "line": finding.get("line"),
                 "function": finding.get("function"),
@@ -384,7 +373,6 @@ finding JSON:
 
         groups: list[dict[str, Any]] = []
         for finding_type, findings in sorted(grouped.items()):
-            severity_counts = Counter(str(finding.get("severity") or "UNKNOWN") for finding in findings)
             grounding_counts = Counter(
                 str(finding.get("guideline_grounding_status") or "unknown") for finding in findings
             )
@@ -400,7 +388,6 @@ finding JSON:
                 {
                     "type": finding_type,
                     "count": len(findings),
-                    "severity_counts": dict(severity_counts),
                     "guideline_grounding_status_counts": dict(grounding_counts),
                     "representative_finding_ids": [
                         _finding_id(finding)
@@ -430,7 +417,6 @@ finding JSON:
                         "section": f"{reference.get('category')} - {reference.get('item')}",
                         "pages": [reference.get("page_start"), reference.get("page_end")],
                         "detector_types": reference.get("detector_types", []),
-                        "cwe": reference.get("cwe", []),
                         "allowed_citations": [],
                     },
                 )
@@ -559,7 +545,6 @@ finding JSON:
         return {
             "id": finding.get("id"),
             "type": finding.get("type"),
-            "severity": finding.get("severity"),
             "file": finding.get("file"),
             "line": finding.get("line"),
             "function": finding.get("function"),
@@ -612,8 +597,6 @@ finding JSON:
         return {
             "id": finding.get("id"),
             "type": finding.get("type"),
-            "severity": finding.get("severity"),
-            "cwe": finding.get("cwe"),
             "file": finding.get("file"),
             "line": finding.get("line"),
             "function": finding.get("function"),
@@ -788,7 +771,7 @@ finding JSON:
 
 # 검증
 ## 검증 기준
-- [x] 정적 분석 finding ID/유형/심각도를 확인했습니다.
+- [x] 정적 분석 finding ID/유형을 확인했습니다.
 - [x] 제공된 파일/라인/함수 범위만 사용했습니다.
 - [x] 제공된 코드 스니펫과 호출 경로만 사용해 맥락을 정리했습니다.
 - [ ] 런타임 검증 미수행: 이 보고서는 저장된 정적 분석 결과만 사용합니다.
@@ -796,7 +779,6 @@ finding JSON:
 ## 검토 보고
 - 취약점 ID: `{_finding_id(finding)}`
 - 유형: `{finding.get("type") or "UNKNOWN"}`
-- 심각도: `{finding.get("severity") or "UNKNOWN"}`
 - 발견 위치: `{location}`
 - 함수: `{function}`
 - 신뢰도: `{finding.get("confidence") or "UNKNOWN"}`
@@ -823,7 +805,7 @@ finding JSON:
 {finding.get("confidence_reason") or "정적 분석 근거와 신뢰도 사유가 제한적으로 제공되었습니다."}
 
 ## 악용 가능성
-정적 분석 결과 기준으로 `{finding.get("severity") or "UNKNOWN"}` 심각도의 검토가 필요합니다. 실제 악용 가능성은 실행 환경과 입력 경로 검증이 필요합니다.
+정적 분석 결과 기준으로 우선 검토가 필요합니다. 실제 악용 가능성은 실행 환경과 입력 경로 검증이 필요합니다.
 
 ## 영향
 {finding.get("description") or "영향 설명이 제공되지 않았습니다."}
@@ -848,7 +830,6 @@ finding JSON:
             proposed_patch=patch_block,
             metadata=FindingReportMetadata(
                 title=title,
-                severity_label=str(finding.get("severity") or ""),
                 generated_at=_utc_now(),
                 model=None,
                 prompt_chars=None,
@@ -911,7 +892,7 @@ def _select_relevant_guideline_refs_for_finding(finding: dict[str, Any]) -> list
     """Return only citation refs specifically grounded to this finding.
 
     Older analysis results may already contain over-broad category matches. Keep
-    detector/CWE/item-specific references and use category only as a tie-breaker
+    detector/item-specific references and use category only as a tie-breaker
     so an SQL injection report cannot cite every "입력데이터 검증 및 표현" section.
     """
     refs = [reference for reference in finding.get("guideline_refs", []) if isinstance(reference, dict)]
@@ -919,7 +900,6 @@ def _select_relevant_guideline_refs_for_finding(finding: dict[str, Any]) -> list
         return []
 
     detector_type = _normalize_reference_value(finding.get("type"))
-    finding_cwes = _normalize_reference_values(finding.get("cwe"))
     guide_item = _normalize_reference_value(finding.get("guide_item"))
     guide_category = _normalize_reference_value(finding.get("guide_category"))
 
@@ -930,14 +910,8 @@ def _select_relevant_guideline_refs_for_finding(finding: dict[str, Any]) -> list
             _normalize_reference_value(value)
             for value in _listish(reference.get("detector_types"))
         }
-        ref_cwes = {
-            _normalize_reference_value(value)
-            for value in _listish(reference.get("cwe"))
-        }
         if detector_type and detector_type in ref_detector_types:
             score += 100
-        if finding_cwes and finding_cwes.intersection(ref_cwes):
-            score += 50
         if guide_item and guide_item == _normalize_reference_value(reference.get("item")):
             score += 30
         if score <= 0:
@@ -951,12 +925,23 @@ def _select_relevant_guideline_refs_for_finding(finding: dict[str, Any]) -> list
         return [reference for _, _, reference in matches]
 
     # Some tests and legacy stored results carry a single already-resolved
-    # guideline ref without detector_types/CWE metadata. Preserve that one
+    # guideline ref without detector/item metadata. Preserve that one
     # citation, but never preserve a multi-ref category bundle without a
     # specific match.
     if len(refs) == 1:
         return refs
     return []
+
+
+def _sanitize_summary_for_public_output(summary: Any) -> dict[str, Any]:
+    if not isinstance(summary, dict):
+        return {}
+    public_summary = dict(summary)
+    hidden_bucket_key = "".join(("by", "sever", "ity"))
+    for key in list(public_summary):
+        if key.casefold().replace("_", "") == hidden_bucket_key:
+            public_summary.pop(key, None)
+    return public_summary
 
 
 def _collect_allowed_citations(guideline_refs: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -5,7 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-Severity = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 Confidence = Literal["HIGH", "MEDIUM", "LOW"]
 LLMReportStatus = Literal["unavailable", "generated", "failed", "skipped_context_budget_exceeded"]
 FindingReportStatus = Literal[
@@ -19,11 +18,6 @@ FindingReportSource = Literal["llm", "static_fallback"]
 GuidelineGroundingStatus = Literal["matched", "missing", "ambiguous"]
 FindingAnalysisStatus = Literal["confirmed", "needs_review"]
 LLMExplanationStatus = Literal["unavailable", "generated", "skipped", "failed", "skipped_context_budget_exceeded"]
-
-
-class CvssInfo(BaseModel):
-    score: float | None = None
-    vector: str | None = None
 
 
 class GuidelineCitation(BaseModel):
@@ -44,7 +38,6 @@ class GuidelineReference(BaseModel):
     page_start: int
     page_end: int
     detector_types: list[str] = Field(default_factory=list)
-    cwe: list[str] = Field(default_factory=list)
     overview: str = ""
     security_measures: str = ""
     diagnosis: str = ""
@@ -62,7 +55,6 @@ class FindingLLMExplanation(BaseModel):
 
 class FindingReportMetadata(BaseModel):
     title: str
-    severity_label: str | None = None
     generated_at: str | None = None
     model: str | None = None
     prompt_chars: int | None = None
@@ -93,12 +85,9 @@ class CallChainDetail(BaseModel):
 class VulnerabilityFinding(BaseModel):
     id: str
     type: str
-    severity: Severity
-    cwe: str
     guide_source: str
     guide_category: str
     guide_item: str
-    cvss: CvssInfo | None = None
     file: str
     line: int | None = None
     function: str | None = None
@@ -136,7 +125,6 @@ class AnalysisSummary(BaseModel):
     total_vulnerabilities: int
     by_type: dict[str, int] = Field(default_factory=dict)
     by_guide_category: dict[str, int] = Field(default_factory=dict)
-    by_severity: dict[str, int] = Field(default_factory=dict)
     score: SecurityScore
 
 
@@ -167,7 +155,6 @@ class FileAnalysisSummary(BaseModel):
     total_vulnerabilities: int
     by_type: dict[str, int] = Field(default_factory=dict)
     by_guide_category: dict[str, int] = Field(default_factory=dict)
-    by_severity: dict[str, int] = Field(default_factory=dict)
     score: int | None = None
 
 
@@ -198,7 +185,6 @@ class AnalysisResultListItem(BaseModel):
     language: str
     files_analyzed: int
     total_vulnerabilities: int
-    severity_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class AnalysisResultListResponse(BaseModel):

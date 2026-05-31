@@ -23,7 +23,6 @@ def sample_result(repository: str = "repo", total: int = 1) -> dict:
             "summary": {
                 "total_vulnerabilities": total,
                 "by_type": {},
-                "by_severity": {"HIGH": total},
                 "score": {"overall": 90, "by_file": {}},
             },
         }

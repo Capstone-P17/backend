@@ -5,8 +5,6 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DetectorMetadata:
-    cwe: str
-    severity: str
     guide_source: str
     guide_category: str
     guide_item: str
@@ -22,8 +20,6 @@ GUIDE_SOURCE = "행정안전부 「소프트웨어 보안약점 진단가이드(
 
 DETECTOR_METADATA: dict[str, DetectorMetadata] = {
     "SQL_INJECTION": DetectorMetadata(
-        cwe="CWE-89",
-        severity="HIGH",
         guide_source=GUIDE_SOURCE,
         guide_category="입력데이터 검증 및 표현",
         guide_item="SQL 삽입",
@@ -34,8 +30,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="외부 입력 또는 메서드 파라미터가 SQL 문자열 생성 지점을 거쳐 SQL 실행 API까지 도달하는 흐름을 확인했기 때문에 HIGH로 판단했습니다.",
     ),
     "XSS": DetectorMetadata(
-        cwe="CWE-79",
-        severity="HIGH",
         guide_source=GUIDE_SOURCE,
         guide_category="입력데이터 검증 및 표현",
         guide_item="크로스사이트 스크립트",
@@ -46,8 +40,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="사용자 입력이 HTML 응답 출력 지점까지 전달되고, 탐지 가능한 HTML 이스케이프 또는 sanitizer 호출이 확인되지 않았기 때문에 HIGH로 판단했습니다.",
     ),
     "HARDCODED_SECRET": DetectorMetadata(
-        cwe="CWE-798",
-        severity="MEDIUM",
         guide_source=GUIDE_SOURCE,
         guide_category="보안기능",
         guide_item="하드코드된 비밀번호 / 하드코드된 암호화 키",
@@ -58,8 +50,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="민감 키워드 변수 또는 비밀값 형식 문자열이 소스 코드에 하드코딩되어 저장소 노출 위험이 있으므로 MEDIUM으로 판단했습니다. 실제 민감 호출 사용이 확인되면 개별 finding의 신뢰도를 HIGH로 올립니다.",
     ),
     "PATH_TRAVERSAL": DetectorMetadata(
-        cwe="CWE-22",
-        severity="HIGH",
         guide_source=GUIDE_SOURCE,
         guide_category="입력데이터 검증 및 표현",
         guide_item="경로 조작 및 자원 삽입",
@@ -70,8 +60,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="사용자 입력이 경로 생성 또는 파일 접근 API로 직접 전달되는 패턴을 확인했기 때문에 HIGH로 판단했습니다.",
     ),
     "COMMAND_INJECTION": DetectorMetadata(
-        cwe="CWE-78",
-        severity="CRITICAL",
         guide_source=GUIDE_SOURCE,
         guide_category="입력데이터 검증 및 표현",
         guide_item="운영체제 명령어 삽입",
@@ -82,8 +70,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="사용자 입력이 운영체제 명령 실행 API에 전달되는 위험한 호출 흐름을 확인했기 때문에 HIGH로 판단했습니다.",
     ),
     "INSECURE_RANDOM": DetectorMetadata(
-        cwe="CWE-338",
-        severity="MEDIUM",
         guide_source=GUIDE_SOURCE,
         guide_category="보안기능",
         guide_item="적절하지 않은 난수값 사용",
@@ -94,8 +80,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="예측 가능한 난수 생성기 사용은 확인했지만 해당 값이 실제 보안 토큰이나 키로 쓰이는 전체 맥락은 제한적으로만 확인되므로 MEDIUM으로 판단했습니다.",
     ),
     "WEAK_HASH": DetectorMetadata(
-        cwe="CWE-328",
-        severity="MEDIUM",
         guide_source=GUIDE_SOURCE,
         guide_category="보안기능",
         guide_item="취약한 암호화 알고리즘 사용 / 솔트 없이 일방향 해시 함수 사용",
@@ -106,8 +90,6 @@ DETECTOR_METADATA: dict[str, DetectorMetadata] = {
         confidence_reason="MD5 또는 SHA-1처럼 알려진 취약 해시 알고리즘 호출이 코드에서 직접 확인되었기 때문에 HIGH로 판단했습니다.",
     ),
     "DANGEROUS_FILE_UPLOAD": DetectorMetadata(
-        cwe="CWE-434",
-        severity="HIGH",
         guide_source=GUIDE_SOURCE,
         guide_category="입력데이터 검증 및 표현",
         guide_item="위험한 형식 파일 업로드",
@@ -136,7 +118,6 @@ def enrich_finding(finding: dict) -> dict:
         return finding
 
     enriched = dict(finding)
-    enriched.setdefault("cwe", metadata.cwe)
     enriched.setdefault("guide_source", metadata.guide_source)
     enriched.setdefault("guide_category", metadata.guide_category)
     enriched.setdefault("guide_item", metadata.guide_item)

@@ -23,7 +23,6 @@ class GuidelineReference(BaseModel):
     page_start: int
     page_end: int
     detector_types: list[str] = Field(default_factory=list)
-    cwe: list[str] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
     overview: str = ""
     security_measures: str = ""
@@ -48,7 +47,6 @@ class GuidelineReference(BaseModel):
             page_start=int(scope.get("page_start", 0)),
             page_end=int(scope.get("page_end", 0)),
             detector_types=[str(value) for value in mapping.get("detector_types", [])],
-            cwe=[str(value) for value in mapping.get("cwe", [])],
             aliases=[str(value) for value in mapping.get("aliases", [])],
             overview=str(content.get("overview", "")),
             security_measures=str(content.get("security_measures", "")),
@@ -70,7 +68,6 @@ class GuidelineReference(BaseModel):
             "page_start": self.page_start,
             "page_end": self.page_end,
             "detector_types": self.detector_types,
-            "cwe": self.cwe,
             "overview": self.overview,
             "security_measures": self.security_measures,
             "diagnosis": self.diagnosis,

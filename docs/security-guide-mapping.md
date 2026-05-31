@@ -22,16 +22,16 @@
 
 ## 현재 지원 Detector
 
-| Detector | CWE | 가이드 분류 | 공식 가이드 항목 | 구현 상태 | 주요 탐지 근거 |
-|---|---|---|---|---|---|
-| `SQL_INJECTION` | CWE-89 | 입력데이터 검증 및 표현 | SQL 삽입 | 구현 | 사용자 입력 또는 메서드 파라미터가 SQL 문자열 생성 지점을 거쳐 `executeQuery`, `executeUpdate` 등 SQL 실행 API에 도달하는 흐름 |
-| `XSS` | CWE-79 | 입력데이터 검증 및 표현 | 크로스사이트 스크립트 | 구현 | 사용자 입력이 HTML 응답 출력 지점에 도달하고, HTML 이스케이프 또는 sanitizer 호출이 확인되지 않는 흐름 |
-| `PATH_TRAVERSAL` | CWE-22 | 입력데이터 검증 및 표현 | 경로 조작 및 자원 삽입 | 구현 | 사용자 입력이 `File`, `FileInputStream`, `Paths.get` 등 경로 생성/파일 접근 API에 전달되는 흐름 |
-| `COMMAND_INJECTION` | CWE-78 | 입력데이터 검증 및 표현 | 운영체제 명령어 삽입 | 구현 | 사용자 입력이 `Runtime.exec` 또는 `ProcessBuilder` 명령 실행 지점에 전달되는 흐름 |
-| `DANGEROUS_FILE_UPLOAD` | CWE-434 | 입력데이터 검증 및 표현 | 위험한 형식 파일 업로드 | 부분 구현 | 업로드 파일이 저장 API에 전달될 때 확장자, Content-Type, 파일 시그니쳐, 크기, 개수, 파일명 재생성, 저장 경로, 실행권한, 다운로드 검증 근거를 확인 |
-| `HARDCODED_SECRET` | CWE-798 | 보안기능 | 하드코드된 비밀번호 / 하드코드된 암호화 키 | 부분 구현 | 민감 키워드 변수 또는 비밀값 형식 문자열이 하드코딩된 경우. 민감 호출 사용처가 확인되면 신뢰도와 근거를 강화 |
-| `INSECURE_RANDOM` | CWE-338 | 보안기능 | 적절하지 않은 난수값 사용 | 구현 | 토큰, 세션, 키 등 보안 문맥에서 `java.util.Random`이 사용되는 패턴. 비보안 문맥은 제외하거나 낮은 신뢰도로 분류 |
-| `WEAK_HASH` | CWE-328 | 보안기능 | 취약한 암호화 알고리즘 사용 / 솔트 없이 일방향 해시함수 사용 | 부분 구현 | `MessageDigest.getInstance("MD5")`, `"SHA-1"`, `"SHA1"` 등 취약 해시 알고리즘 호출과 비밀번호/토큰 문맥의 salt/KDF 없는 일반 해시 사용 |
+| Detector | 가이드 분류 | 공식 가이드 항목 | 구현 상태 | 주요 탐지 근거 |
+|---|---|---|---|---|
+| `SQL_INJECTION` | 입력데이터 검증 및 표현 | SQL 삽입 | 구현 | 사용자 입력 또는 메서드 파라미터가 SQL 문자열 생성 지점을 거쳐 `executeQuery`, `executeUpdate` 등 SQL 실행 API에 도달하는 흐름 |
+| `XSS` | 입력데이터 검증 및 표현 | 크로스사이트 스크립트 | 구현 | 사용자 입력이 HTML 응답 출력 지점에 도달하고, HTML 이스케이프 또는 sanitizer 호출이 확인되지 않는 흐름 |
+| `PATH_TRAVERSAL` | 입력데이터 검증 및 표현 | 경로 조작 및 자원 삽입 | 구현 | 사용자 입력이 `File`, `FileInputStream`, `Paths.get` 등 경로 생성/파일 접근 API에 전달되는 흐름 |
+| `COMMAND_INJECTION` | 입력데이터 검증 및 표현 | 운영체제 명령어 삽입 | 구현 | 사용자 입력이 `Runtime.exec` 또는 `ProcessBuilder` 명령 실행 지점에 전달되는 흐름 |
+| `DANGEROUS_FILE_UPLOAD` | 입력데이터 검증 및 표현 | 위험한 형식 파일 업로드 | 부분 구현 | 업로드 파일이 저장 API에 전달될 때 확장자, Content-Type, 파일 시그니쳐, 크기, 개수, 파일명 재생성, 저장 경로, 실행권한, 다운로드 검증 근거를 확인 |
+| `HARDCODED_SECRET` | 보안기능 | 하드코드된 비밀번호 / 하드코드된 암호화 키 | 부분 구현 | 민감 키워드 변수 또는 비밀값 형식 문자열이 하드코딩된 경우. 민감 호출 사용처가 확인되면 신뢰도와 근거를 강화 |
+| `INSECURE_RANDOM` | 보안기능 | 적절하지 않은 난수값 사용 | 구현 | 토큰, 세션, 키 등 보안 문맥에서 `java.util.Random`이 사용되는 패턴. 비보안 문맥은 제외하거나 낮은 신뢰도로 분류 |
+| `WEAK_HASH` | 보안기능 | 취약한 암호화 알고리즘 사용 / 솔트 없이 일방향 해시함수 사용 | 부분 구현 | `MessageDigest.getInstance("MD5")`, `"SHA-1"`, `"SHA1"` 등 취약 해시 알고리즘 호출과 비밀번호/토큰 문맥의 salt/KDF 없는 일반 해시 사용 |
 
 ## 구현단계 가이드 항목 매핑
 

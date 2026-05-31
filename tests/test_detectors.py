@@ -30,7 +30,6 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
     for finding in analysis["vulnerabilities"]:
         assert finding["description"]
         assert finding["recommendation"]
-        assert finding["cwe"]
         assert finding["guide_source"] == "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」"
         assert finding["guide_category"]
         assert finding["guide_item"]
@@ -53,7 +52,6 @@ def test_vulnerability_schema_requires_enriched_fields() -> None:
     base = {
         "id": "VULN-001",
         "type": "SQL_INJECTION",
-        "severity": "HIGH",
         "file": "UserDAO.java",
         "line": 10,
         "function": "findUser",
@@ -61,11 +59,9 @@ def test_vulnerability_schema_requires_enriched_fields() -> None:
         "call_chain": [],
         "evidence": "sql 값이 stmt.executeQuery로 실행됩니다.",
         "description": "사용자 입력이 SQL에 직접 결합됩니다.",
-        "cvss": {"score": 7.5, "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"},
     }
 
     for required_field in (
-        "cwe",
         "guide_source",
         "guide_category",
         "guide_item",
@@ -75,7 +71,6 @@ def test_vulnerability_schema_requires_enriched_fields() -> None:
     ):
         payload = {
             **base,
-            "cwe": "CWE-89",
             "guide_source": "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」",
             "guide_category": "입력데이터 검증 및 표현",
             "guide_item": "SQL 삽입",

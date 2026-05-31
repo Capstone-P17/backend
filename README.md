@@ -11,7 +11,7 @@ DoUSECURE는 Java 소스코드를 대상으로 보안 취약점을 정적 분석
 - GitHub 저장소, 단일 Java 파일, 압축 파일 업로드 분석
 - `tree-sitter-java` 기반 AST 파싱과 rule-based detector 실행
 - SQL Injection, XSS, Path Traversal, Command Injection, Dangerous File Upload 등 8개 detector 지원
-- 공식 보안약점 진단가이드 항목, CWE, severity, confidence, evidence 매핑
+- 공식 보안약점 진단가이드 항목, confidence, evidence 매핑
 - OpenAI API 설정 시 LLM 기반 상세 리포트 생성
 - PDF 리포트 다운로드와 분석 결과 조회 API 제공
 

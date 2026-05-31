@@ -4,7 +4,7 @@
 The generated JSON is intentionally structured around implementation-stage
 vulnerability items instead of arbitrary vector chunks.  Static-analysis
 findings can then deterministically attach the right guideline entry by
-detector type, CWE, or guide item before any LLM/RAG step runs.
+detector type or guide item before any LLM/RAG step runs.
 
 Requirements:
   - poppler's `pdftotext` CLI must be installed and available on PATH.
@@ -56,7 +56,6 @@ class GuideItem:
     item: str
     page_start: int
     detector_types: tuple[str, ...] = ()
-    cwe: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     page_end: int | None = field(default=None, compare=False)
 
@@ -81,11 +80,11 @@ class GuideItem:
 
 
 IMPLEMENTATION_ITEMS: tuple[GuideItem, ...] = (
-    GuideItem("입력데이터 검증 및 표현", "1", "SQL 삽입", 178, ("SQL_INJECTION",), ("CWE-89",), ("SQL Injection", "SQL 인젝션")),
-    GuideItem("입력데이터 검증 및 표현", "2", "경로 조작 및 자원 삽입", 192, ("PATH_TRAVERSAL",), ("CWE-22",), ("Path Traversal",)),
-    GuideItem("입력데이터 검증 및 표현", "3", "크로스사이트 스크립트", 202, ("XSS",), ("CWE-79",), ("Cross-site Scripting", "XSS")),
-    GuideItem("입력데이터 검증 및 표현", "4", "운영체제 명령어 삽입", 214, ("COMMAND_INJECTION",), ("CWE-78",), ("OS Command Injection",)),
-    GuideItem("입력데이터 검증 및 표현", "5", "위험한 형식 파일 업로드", 223, ("DANGEROUS_FILE_UPLOAD",), ("CWE-434",), ("Unrestricted File Upload",)),
+    GuideItem("입력데이터 검증 및 표현", "1", "SQL 삽입", 178, ("SQL_INJECTION",), ("SQL Injection", "SQL 인젝션")),
+    GuideItem("입력데이터 검증 및 표현", "2", "경로 조작 및 자원 삽입", 192, ("PATH_TRAVERSAL",), ("Path Traversal",)),
+    GuideItem("입력데이터 검증 및 표현", "3", "크로스사이트 스크립트", 202, ("XSS",), ("Cross-site Scripting", "XSS")),
+    GuideItem("입력데이터 검증 및 표현", "4", "운영체제 명령어 삽입", 214, ("COMMAND_INJECTION",), ("OS Command Injection",)),
+    GuideItem("입력데이터 검증 및 표현", "5", "위험한 형식 파일 업로드", 223, ("DANGEROUS_FILE_UPLOAD",), ("Unrestricted File Upload",)),
     GuideItem("입력데이터 검증 및 표현", "6", "신뢰되지 않는 URL 주소로 자동접속 연결", 230),
     GuideItem("입력데이터 검증 및 표현", "7", "XQuery 삽입", 235),
     GuideItem("입력데이터 검증 및 표현", "8", "XPath 삽입", 241),
@@ -99,17 +98,17 @@ IMPLEMENTATION_ITEMS: tuple[GuideItem, ...] = (
     GuideItem("보안기능", "1", "적절한 인증 없는 중요기능 허용", 291),
     GuideItem("보안기능", "2", "부적절한 인가", 296),
     GuideItem("보안기능", "3", "중요한 자원에 대한 잘못된 권한 설정", 302),
-    GuideItem("보안기능", "4", "취약한 암호화 알고리즘 사용", 307, ("WEAK_HASH",), ("CWE-327", "CWE-328"), ("Weak Cryptographic Algorithm",)),
+    GuideItem("보안기능", "4", "취약한 암호화 알고리즘 사용", 307, ("WEAK_HASH",), ("Weak Cryptographic Algorithm",)),
     GuideItem("보안기능", "5", "중요정보 평문저장", 314),
     GuideItem("보안기능", "6", "중요정보 평문전송", 319),
-    GuideItem("보안기능", "7", "하드코드된 비밀번호", 327, ("HARDCODED_SECRET",), ("CWE-798",), ("Hardcoded Password",)),
+    GuideItem("보안기능", "7", "하드코드된 비밀번호", 327, ("HARDCODED_SECRET",), ("Hardcoded Password",)),
     GuideItem("보안기능", "8", "충분하지 않은 키 길이 사용", 332),
-    GuideItem("보안기능", "9", "적절하지 않은 난수값 사용", 336, ("INSECURE_RANDOM",), ("CWE-338",), ("Insecure Randomness",)),
-    GuideItem("보안기능", "10", "하드코드된 암호화 키", 342, ("HARDCODED_SECRET",), ("CWE-321", "CWE-798"), ("Hardcoded Cryptographic Key",)),
+    GuideItem("보안기능", "9", "적절하지 않은 난수값 사용", 336, ("INSECURE_RANDOM",), ("Insecure Randomness",)),
+    GuideItem("보안기능", "10", "하드코드된 암호화 키", 342, ("HARDCODED_SECRET",), ("Hardcoded Cryptographic Key",)),
     GuideItem("보안기능", "11", "취약한 비밀번호 허용", 348),
     GuideItem("보안기능", "12", "사용자 하드디스크에 저장되는 쿠키를 통한 정보노출", 353),
     GuideItem("보안기능", "13", "주석문 안에 포함된 시스템 주요정보", 357),
-    GuideItem("보안기능", "14", "솔트 없이 일방향 해시함수 사용", 361, ("WEAK_HASH",), ("CWE-759",), ("Unsalted Hash",)),
+    GuideItem("보안기능", "14", "솔트 없이 일방향 해시함수 사용", 361, ("WEAK_HASH",), ("Unsalted Hash",)),
     GuideItem("보안기능", "15", "무결성 검사 없는 코드 다운로드", 365),
     GuideItem("보안기능", "16", "반복된 인증시도 제한 기능 부재", 371),
     GuideItem("시간 및 상태", "1", "경쟁조건: 검사 시점과 사용 시점(TOCTOU)", 377),
@@ -149,7 +148,7 @@ def main() -> int:
     convert_parser = subparsers.add_parser("convert", help="Convert PDF to references JSON.")
     convert_parser.add_argument("--include-full-text", action="store_true", help="Include full item text in JSON.")
 
-    query_parser = subparsers.add_parser("query", help="Query generated references by detector/CWE/item text.")
+    query_parser = subparsers.add_parser("query", help="Query generated references by detector or guide item text.")
     query_parser.add_argument("term", help="Search term, e.g. SQL_INJECTION or SQL 삽입.")
     query_parser.add_argument("--limit", type=int, default=5)
     query_parser.add_argument(
@@ -259,7 +258,6 @@ def with_page_ends(items: tuple[GuideItem, ...]) -> list[GuideItem]:
                 item=item.item,
                 page_start=item.page_start,
                 detector_types=item.detector_types,
-                cwe=item.cwe,
                 aliases=item.aliases,
                 page_end=next_start - 1,
             )
@@ -361,7 +359,6 @@ def build_reference(
         },
         "mapping": {
             "detector_types": list(item.detector_types),
-            "cwe": list(item.cwe),
             "aliases": list(item.aliases),
             "guide_item": item.item,
             "guide_category": item.category,
@@ -417,7 +414,6 @@ def query_references(
                 reference.get("scope", {}).get("item", ""),
                 reference.get("scope", {}).get("category", ""),
                 " ".join(reference.get("mapping", {}).get("detector_types", [])),
-                " ".join(reference.get("mapping", {}).get("cwe", [])),
                 " ".join(reference.get("mapping", {}).get("aliases", [])),
             ]
         ).casefold()
@@ -438,7 +434,6 @@ def query_references(
         print(f"  item: {scope['category']} / {scope['item']}")
         print(f"  pages: {scope['page_start']}-{scope['page_end']}")
         print(f"  detectors: {', '.join(mapping.get('detector_types', [])) or '-'}")
-        print(f"  cwe: {', '.join(mapping.get('cwe', [])) or '-'}")
         if section:
             print_detailed_content(reference, section, max_chars=max_chars)
         else:

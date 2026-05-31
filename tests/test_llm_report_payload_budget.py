@@ -24,7 +24,6 @@ def guideline_ref(ref_id: str = "kr-sw-security-guide-2019-sql-injection") -> di
         "page_start": 178,
         "page_end": 191,
         "detector_types": ["SQL_INJECTION"],
-        "cwe": ["CWE-89"],
         "overview": "SQL 삽입 개요" * 200,
         "security_measures": "PreparedStatement를 사용한다." * 200,
         "diagnosis": "Statement 객체를 통해 쿼리가 실행되는 부분을 확인한다." * 200,
@@ -44,7 +43,6 @@ def finding(index: int, *, with_guideline: bool = True) -> dict:
     payload = {
         "id": f"VULN-{index:03d}",
         "type": "SQL_INJECTION" if index % 2 == 0 else "XSS",
-        "severity": "HIGH" if index % 3 == 0 else "MEDIUM",
         "file": f"src/File{index}.java",
         "line": index + 1,
         "function": "run",
@@ -119,7 +117,6 @@ def test_finding_detail_payload_filters_stale_category_wide_guidelines() -> None
     selected.update(
         {
             "type": "SQL_INJECTION",
-            "cwe": "CWE-89",
             "guide_item": "SQL 삽입",
             "guide_category": "입력데이터 검증 및 표현",
             "guideline_refs": stale_category_refs,

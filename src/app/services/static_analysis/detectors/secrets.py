@@ -4,7 +4,6 @@ import math
 import re
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
-from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 
 SECRET_KEYWORDS = ["password", "passwd", "secret", "api_key", "apikey", "token", "credential", "key"]
@@ -244,8 +243,6 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
             {
                 "id": f"VULN-{vuln_counter[0]:03d}",
                 "type": "HARDCODED_SECRET",
-                "severity": "MEDIUM",
-                "cvss": get_cvss("HARDCODED_SECRET", "MEDIUM"),
                 "file": filepath,
                 "line": candidate["name"].start_point[0] + 1,
                 "function": find_parent_method(declaration),

@@ -135,8 +135,5 @@ class AgentService:
     def _build_summary(summary: SecurityAnalysisSummary) -> str:
         return (
             f"총 {summary.total_vulnerabilities}건의 취약점을 탐지했습니다. "
-            f"HIGH {summary.by_severity.get('HIGH', 0)}건, "
-            f"MEDIUM {summary.by_severity.get('MEDIUM', 0)}건, "
-            f"LOW {summary.by_severity.get('LOW', 0)}건이며, "
             f"전체 보안 점수는 {summary.score.overall}점입니다."
         )

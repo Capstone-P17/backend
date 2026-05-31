@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
-from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
 
 # 보안 컨텍스트로 판단할 변수명 키워드
@@ -141,8 +140,6 @@ def detect_insecure_random(filepath, tree, vuln_counter):
                         {
                             "id": f"VULN-{vuln_counter[0]:03d}",
                             "type": "INSECURE_RANDOM",
-                            "severity": "MEDIUM",
-                            "cvss": get_cvss("INSECURE_RANDOM", "MEDIUM"),
                             "file": filepath,
                             "line": node.start_point[0] + 1,
                             "function": method_name,

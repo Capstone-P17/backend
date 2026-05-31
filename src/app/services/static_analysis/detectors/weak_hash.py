@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
-from src.app.services.static_analysis.detectors.cvss import get_cvss
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 
 WEAK_ALGORITHMS = {"MD5", "MD4", "MD2", "SHA-1", "SHA1"}
@@ -203,8 +202,6 @@ def detect_weak_hash(filepath, tree, vuln_counter):
                 {
                     "id": f"VULN-{vuln_counter[0]:03d}",
                     "type": "WEAK_HASH",
-                    "severity": "MEDIUM",
-                    "cvss": get_cvss("WEAK_HASH", "MEDIUM"),
                     "file": filepath,
                     "line": node.start_point[0] + 1,
                     "function": method_name,

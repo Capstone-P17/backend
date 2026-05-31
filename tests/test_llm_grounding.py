@@ -16,7 +16,6 @@ def guideline_ref() -> dict:
         "page_start": 178,
         "page_end": 191,
         "detector_types": ["SQL_INJECTION"],
-        "cwe": ["CWE-89"],
         "overview": "SQL 삽입 개요",
         "security_measures": "PreparedStatement를 사용한다.",
         "diagnosis": "Statement 객체를 통해 쿼리가 실행되는 부분을 확인한다.",

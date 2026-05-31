@@ -28,7 +28,6 @@ class GuidelineRepository:
 
     def find_for_finding(self, finding: dict[str, Any]) -> list[GuidelineReference]:
         detector_type = _normalize(finding.get("type"))
-        cwe = _normalize(finding.get("cwe"))
         guide_item = _normalize(finding.get("guide_item"))
         guide_category = _normalize(finding.get("guide_category"))
 
@@ -37,8 +36,6 @@ class GuidelineRepository:
             score = 0
             if detector_type and detector_type in {_normalize(value) for value in reference.detector_types}:
                 score += 100
-            if cwe and cwe in {_normalize(value) for value in reference.cwe}:
-                score += 50
             if guide_item and guide_item == _normalize(reference.item):
                 score += 30
 
@@ -46,7 +43,7 @@ class GuidelineRepository:
             # SQL injection finding belongs to "입력데이터 검증 및 표현", but that
             # category also contains XSS, path traversal, command injection, and
             # many other unrelated guide sections. Use category only as a
-            # tie-breaker once a detector/CWE/item-specific signal matched.
+            # tie-breaker once a detector/item-specific signal matched.
             if score <= 0:
                 continue
             if guide_category and guide_category == _normalize(reference.category):
