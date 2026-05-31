@@ -104,8 +104,9 @@ def test_finding_detail_endpoint_returns_precomputed_report_and_keeps_result_com
     assert payload["analysis_id"] == analysis_id
     assert payload["finding"]["id"] == finding["id"]
     assert payload["finding"]["finding_report"]["status"] == "static_fallback"
-    assert "# 요약" in payload["finding"]["finding_report"]["markdown"]
-    assert "# 수정 예시" in payload["finding"]["finding_report"]["markdown"]
+    assert "## 문제가 되는 코드" in payload["finding"]["finding_report"]["markdown"]
+    assert "## 수정 예시" in payload["finding"]["finding_report"]["markdown"]
+    assert "# 요약" not in payload["finding"]["finding_report"]["markdown"]
     assert "```diff" in payload["finding"]["finding_report"]["markdown"]
     assert "+++ 수정 방향" in payload["finding"]["finding_report"]["markdown"]
 

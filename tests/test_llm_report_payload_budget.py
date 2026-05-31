@@ -8,7 +8,9 @@ from src.app.services.guidelines.repository import GuidelineRepository
 from src.app.services.llm_report_service import (
     ContextBudgetExceededError,
     SecurityReportGenerator,
+    _clean_markdown,
     _ensure_remediation_sections,
+    _sanitize_llm_explanation_output,
 )
 from src.app.services.result_store import AnalysisResultStore
 
@@ -175,12 +177,92 @@ def test_generated_finding_markdown_is_backfilled_with_static_remediation() -> N
     selected["safe_example"] = 'PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");'
     selected["code_snippet"] = ' 10 | String sql = "SELECT * FROM users WHERE id = " + userId;\n> 11 | stmt.executeQuery(sql);'
 
-    markdown = _ensure_remediation_sections("# 요약\nLLM이 보수적으로 요약만 작성했습니다.", selected)
+    markdown = _ensure_remediation_sections("LLM이 보수적으로 설명만 작성했습니다.", selected)
 
-    assert "# 수정 방법" in markdown
+    assert "## 어떻게 수정할까" in markdown
     assert "PreparedStatement를 사용하세요." in markdown
-    assert "# 수정 예시" in markdown
+    assert "## 수정 예시" in markdown
     assert "PreparedStatement ps = conn.prepareStatement" in markdown
+
+
+def test_clean_markdown_removes_internal_artifacts_and_preserves_code_block() -> None:
+    markdown = _clean_markdown(
+        """
+# 요약
+본 보고서는 제공된 단일 정적 분석 finding JSON만을 근거로 검토했습니다.
+- finding.description, finding.evidence, code_snippet에 나타난 데이터 흐름
+- 런타임 검증이나 실제 공격 수행 여부는 확인하지 않았습니다.
+- CVE/CWE/CVSS는 다음과 같습니다.
+
+## 문제가 되는 코드
+```java
+String json = request.getParameter("json");
+```
+
+사용자 입력이 쿼리 문자열에 직접 결합됩니다.
+""".strip()
+    )
+
+    assert "# 요약" not in markdown
+    assert "finding" not in markdown
+    assert "code_snippet" not in markdown
+    assert "런타임 검증" not in markdown
+    assert "CVE" not in markdown
+    assert 'String json = request.getParameter("json");' in markdown
+    assert "사용자 입력이 쿼리 문자열에 직접 결합됩니다." in markdown
+
+
+def test_static_finding_markdown_avoids_prompt_artifacts() -> None:
+    selected = finding(2)
+    selected["safe_example"] = 'PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");'
+    selected["code_snippet"] = ' 10 | String sql = "SELECT * FROM users WHERE id = " + userId;\n> 11 | stmt.executeQuery(sql);'
+
+    report = SecurityReportGenerator(get_settings()).build_static_finding_markdown_report(
+        finding=selected,
+        analysis={"repository": "repo", "language": "java", "vulnerabilities": [selected]},
+    )
+    markdown = report["markdown"]
+
+    assert "## 문제가 되는 코드" in markdown
+    assert "## 왜 취약한가" in markdown
+    assert "## 어떻게 수정할까" in markdown
+    assert "## 수정 예시" in markdown
+    assert "PreparedStatement를 사용하세요." in markdown
+    for forbidden in (
+        "finding.",
+        "finding JSON",
+        "code_snippet",
+        "call_chain",
+        "guideline_refs",
+        "source_link",
+        "런타임 검증",
+        "실제 공격 수행",
+        "CVE",
+        "CWE",
+        "CVSS",
+        "# 요약",
+        "# 검증",
+        "# 근거와 코드 맥락",
+    ):
+        assert forbidden not in markdown
+
+
+def test_sanitize_llm_explanation_output_removes_internal_artifacts() -> None:
+    sanitized = _sanitize_llm_explanation_output(
+        {
+            "why_vulnerable": "finding.description과 code_snippet 기준입니다.\n외부 입력이 그대로 전달됩니다.",
+            "how_to_fix": "런타임 검증은 하지 않았습니다.\nPreparedStatement를 사용하세요.",
+            "fix_steps": ["guideline_refs를 확인했습니다.", "PreparedStatement 적용"],
+            "cited_guideline_ids": ["kr-sw-security-guide-2019-sql-injection"],
+            "citations": guideline_ref()["citations"],
+            "grounding_notes": "CVE/CWE/CVSS는 제외합니다.",
+        }
+    )
+
+    assert sanitized["why_vulnerable"] == "외부 입력이 그대로 전달됩니다."
+    assert sanitized["how_to_fix"] == "PreparedStatement를 사용하세요."
+    assert sanitized["fix_steps"] == ["PreparedStatement 적용"]
+    assert sanitized["grounding_notes"] is None
 
 
 def test_finding_explanation_input_uses_compact_guideline_brief_limits() -> None:

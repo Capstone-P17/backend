@@ -75,15 +75,16 @@ class SecurityReportGenerator:
 저장소 이름: {repository}
 추가 지시사항: {instructions}
 
-아래는 정적 분석기가 추출한 보안 분석 요약 JSON이다.
+아래는 정적 분석기가 추출한 보안 분석 요약 데이터이다.
 {analysis_json}
 
 위 결과를 바탕으로 한국어 보안 리포트를 작성하라.
 취약점 존재 여부는 정적 분석 evidence를 기준으로 하며, 새로운 취약점 위치나 새로운 취약점을 추측하지 마라.
 취약점 위치는 제공된 file, line, function만 사용하라.
-설명 근거는 finding.evidence, finding.confidence_reason, finding.call_chain, verified llm_explanation, guideline_catalog의 citation 메타데이터만 사용하라.
-출처는 guideline_catalog.allowed_citations 또는 llm_explanation.citations에 있는 source/version/page/section만 명시하라.
-guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 설명하지 말고, 등록된 가이드라인 근거 없음 또는 검토 필요로 표시하라.
+사용자에게 데이터 구조, JSON, 필드명, 속성명, finding.xxx 같은 내부 구현 표현을 노출하지 마라.
+출처는 제공된 공식 가이드 citation 정보만 자연어로 명시하라.
+가이드라인 근거가 없는 항목은 출처를 지어내지 말고, 공식 가이드 근거 확인이 필요하다고 자연스럽게 설명하라.
+CVE, CWE, CVSS, 점수형 위험도, 정량 등급은 쓰지 마라.
 반드시 다음 섹션을 포함하라:
 1. 전체 요약
 2. 주요 취약점 분석
@@ -159,6 +160,7 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
             markdown = self._generate_finding_markdown_from_payload(payload_json)
             markdown = _clean_markdown(markdown)
             markdown = _ensure_remediation_sections(markdown, finding)
+            markdown = _clean_markdown(markdown)
             if self.settings.llm_finding_detail_markdown_max_chars > 0:
                 markdown = _truncate(
                     markdown,
@@ -217,45 +219,36 @@ guideline_refs가 없는 finding은 가이드라인 출처가 있는 것처럼 �
                     (
                         "You are a senior application security analyst. Write safe Markdown only. "
                         "Do not output raw HTML. Do not invent files, lines, runtime validation, "
-                        "numeric risk scores, patches, citations, or exploitability beyond supplied evidence."
+                        "numeric risk scores, CVE/CWE/CVSS identifiers, patches, citations, "
+                        "or exploitability beyond supplied evidence. Never mention JSON, field names, "
+                        "or internal property paths in the user-facing report."
                     ),
                 ),
                 (
                     "human",
                     """
-다음 단일 정적 분석 finding JSON만 사용해 한국어 Markdown 보고서를 작성하라.
+다음 단일 정적 분석 결과 데이터를 사용해 개발자가 바로 읽을 수 있는 한국어 Markdown 보고서를 작성하라.
 코드 식별자와 파일 경로는 원문을 유지한다. 원시 HTML을 쓰지 마라.
-반드시 아래 섹션 순서를 유지하라:
 
-# 요약
-# 검증
-## 검증 기준
-## 검토 보고
-# 근거와 코드 맥락
-## 발견 위치
-## 소스 링크
-## 호출 경로
-## 관련 가이드 인용
-# 공격 경로 분석
-## 판단 근거
-## 악용 가능성
-## 영향
-## 가정
-# 수정 방법
-# 수정 예시
+권장 섹션은 아래 4개만 사용하라:
+## 문제가 되는 코드
+## 왜 취약한가
+## 어떻게 수정할까
+## 수정 예시
 
 규칙:
-- finding.file, finding.line, finding.function에 없는 위치를 만들지 않는다.
-- 런타임 검증을 수행했다고 말하지 않는다. 미수행이면 명시한다.
+- 내부 데이터 구조를 설명하지 않는다. JSON, finding, code_snippet, call_chain, call_chain_details, guideline_refs, source_link 같은 단어를 출력하지 않는다.
+- 런타임 검증/실제 공격 수행 여부에 대한 면책 문구를 쓰지 않는다.
+- CVE, CWE, CVSS, 점수형 위험도, 정량 등급을 쓰지 않는다.
+- 제공된 파일, 라인, 함수에 없는 위치를 만들지 않는다.
 - 패치를 확정할 수 없으면 안전한 패턴 또는 의사코드로 표시한다.
-- code_snippet은 fenced code block으로 유지하고, 수정 예시는 가능하면 ```diff fenced block으로 작성한다.
+- 취약 코드 맥락은 fenced code block으로 유지하고, 수정 예시는 가능하면 ```diff fenced block으로 작성한다.
 - diff에는 제공된 취약 코드/라인과 safe_example/recommendation에서 직접 근거가 있는 변경만 포함한다.
-- 출처는 guideline_refs[].citations에 있는 값만 쓴다.
-- 제공된 static evidence, code_snippet, call_chain, source_link, guideline_refs만 근거로 쓴다.
-- Evidence에는 취약점이 발생한 한 줄만 쓰지 말고, 저장된 code_snippet과 call_chain을 함께 사용해 주변 코드/호출 맥락을 설명한다.
-- source_link가 있으면 Markdown 링크로 제공하고, 없으면 링크를 추정하지 않는다.
+- 공식 가이드 출처는 제공된 citation 값만 자연어로 쓴다.
+- 취약점이 발생한 한 줄만 쓰지 말고, 제공된 코드 맥락과 호출 흐름을 자연어로 설명한다.
+- 소스 링크가 있으면 Markdown 링크로 제공하고, 없으면 링크를 추정하지 않는다.
 
-finding JSON:
+정적 분석 결과 데이터:
 {finding_json}
 """.strip(),
                 ),
@@ -505,14 +498,16 @@ finding JSON:
                 (
                     "human",
                     """
-다음 정적 분석 finding에 대한 구조화된 한국어 설명 JSON만 생성하라.
+다음 정적 분석 결과에 대한 구조화된 한국어 설명 JSON만 생성하라.
 
 제약:
-- 취약점 존재 여부는 finding.evidence와 confidence_reason을 기준으로 한다.
+- 취약점 존재 여부는 제공된 탐지 근거와 신뢰도 사유를 기준으로 한다.
 - 취약점 위치는 제공된 file, line, function만 사용한다.
 - 새로운 취약점, 파일, 라인, 함수, 출처를 추측하지 않는다.
-- 가이드라인 출처는 guideline_refs[].citations에 있는 값만 사용한다.
-- cited_guideline_ids에는 guideline_refs[].id에 존재하는 값만 넣는다.
+- 가이드라인 출처는 제공된 citations 값만 사용한다.
+- cited_guideline_ids에는 제공된 guideline id에 존재하는 값만 넣는다.
+- 설명 본문 값에는 JSON, finding.xxx, code_snippet, call_chain, guideline_refs, source_link 같은 내부 구현 표현을 쓰지 않는다.
+- 런타임 검증/실제 공격 수행 여부 면책 문구와 CVE/CWE/CVSS/점수형 위험도 표현은 쓰지 않는다.
 
 필수 JSON 형식:
 {{
@@ -526,7 +521,7 @@ finding JSON:
   "grounding_notes": null
 }}
 
-finding JSON:
+정적 분석 결과 데이터:
 {finding_json}
 """.strip(),
                 ),
@@ -539,7 +534,7 @@ finding JSON:
             if _is_context_limit_error(exc):
                 raise ContextBudgetExceededError(str(exc) or "Finding explanation context budget exceeded") from exc
             raise
-        return _parse_json_object(self._coerce_content(response.content))
+        return _sanitize_llm_explanation_output(_parse_json_object(self._coerce_content(response.content)))
 
     def _build_finding_explanation_input(self, finding: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -756,69 +751,40 @@ finding JSON:
         else:
             call_chain_lines = "\n".join(f"- `{item}`" for item in call_chain) or "- 제공된 호출 경로 없음"
         source_link = str(finding.get("source_link") or "").strip()
-        source_link_lines = f"- [GitHub에서 보기]({source_link})" if source_link else "- 제공된 소스 링크 없음"
+        source_link_lines = f"\n\n[GitHub에서 해당 위치 열기]({source_link})" if source_link else ""
         code_block = f"\n```java\n{code_snippet}\n```\n" if code_snippet else "\n코드 스니펫이 제공되지 않았습니다.\n"
         patch_block = (
             _build_static_diff_patch(code_snippet=code_snippet, safe_example=safe_example)
             if safe_example
-            else "구체적인 patch는 원본 파일 전체 문맥이 필요해 자동 생성하지 않았습니다. 위 remediation을 기준으로 수동 수정하세요."
+            else "구체적인 패치는 원본 파일 전체 문맥 확인 후 적용하세요. 위 수정 방향을 기준으로 취약 API 사용부를 안전한 패턴으로 교체하면 됩니다."
         )
-        fallback_reason = reason or "LLM 상세 Markdown을 사용할 수 없어 정적 분석 근거로 작성했습니다."
         markdown = _clean_markdown(
             f"""
-# 요약
-{summary}
-
-# 검증
-## 검증 기준
-- [x] 정적 분석 finding ID/유형을 확인했습니다.
-- [x] 제공된 파일/라인/함수 범위만 사용했습니다.
-- [x] 제공된 코드 스니펫과 호출 경로만 사용해 맥락을 정리했습니다.
-- [ ] 런타임 검증 미수행: 이 보고서는 저장된 정적 분석 결과만 사용합니다.
-
-## 검토 보고
-- 취약점 ID: `{_finding_id(finding)}`
-- 유형: `{finding.get("type") or "UNKNOWN"}`
-- 발견 위치: `{location}`
-- 함수: `{function}`
-- 신뢰도: `{finding.get("confidence") or "UNKNOWN"}`
-- Fallback 사유: {fallback_reason}
-
-# 근거와 코드 맥락
-## 발견 위치
-{evidence}
-
-### 탐지 코드 맥락
-저장된 분석 결과에 포함된 코드 맥락입니다.
-{code_block}
-### 소스 링크
+## 문제가 되는 코드
+`{location}`의 `{function}` 함수에서 `{title}` 항목이 발견되었습니다. {summary}
 {source_link_lines}
 
-### 호출 경로
+{code_block}
+
+## 왜 취약한가
+{evidence}
+
+관련 호출 흐름은 다음과 같습니다.
 {call_chain_lines}
 
-### 관련 가이드 인용
+공식 가이드 기준:
 {citation_lines}
-
-# 공격 경로 분석
-## 판단 근거
-{finding.get("confidence_reason") or "정적 분석 근거와 신뢰도 사유가 제한적으로 제공되었습니다."}
-
-## 악용 가능성
-정적 분석 결과 기준으로 우선 검토가 필요합니다. 실제 악용 가능성은 실행 환경과 입력 경로 검증이 필요합니다.
 
 ## 영향
 {finding.get("description") or "영향 설명이 제공되지 않았습니다."}
 
-## 가정
-- 새로운 파일, 라인 번호, 런타임 검증 결과를 추정하지 않았습니다.
-- sibling finding 상세는 포함하지 않았습니다. 이 보고서는 선택된 finding 하나만 다룹니다.
-- 저장소: `{analysis.get("repository") or ""}`
+판단 근거:
+{finding.get("confidence_reason") or "정적 분석 근거와 신뢰도 사유가 제한적으로 제공되었습니다."}
 
-# 수정 방법
+## 어떻게 수정할까
 {recommendation}
 
-# 수정 예시
+## 수정 예시
 {patch_block}
 """.strip()
         )
@@ -835,7 +801,7 @@ finding JSON:
                 prompt_chars=None,
                 source="static_fallback",
             ),
-            error=fallback_reason,
+            error=reason or "LLM 상세 Markdown을 사용할 수 없어 정적 분석 근거로 작성했습니다.",
         )
         return report.model_dump()
 
@@ -1046,6 +1012,28 @@ def _parse_json_object(value: str) -> dict[str, Any]:
     return parsed
 
 
+def _sanitize_llm_explanation_output(explanation: dict[str, Any]) -> dict[str, Any]:
+    """Remove prompt/data-structure artifacts before text reaches the UI."""
+    sanitized = dict(explanation)
+    fallback_text = {
+        "why_vulnerable": "제공된 코드에서 외부 입력이 검증 없이 민감한 처리 지점에 전달되는 흐름이 확인되었습니다.",
+        "how_to_fix": "취약 지점의 입력 검증과 안전한 API 사용 패턴을 적용하세요.",
+    }
+    for field in ("why_vulnerable", "how_to_fix", "grounding_notes"):
+        if field not in sanitized or sanitized[field] is None:
+            continue
+        cleaned = _strip_user_facing_artifact_lines(str(sanitized[field])).strip()
+        sanitized[field] = cleaned or fallback_text.get(field)
+
+    if isinstance(sanitized.get("fix_steps"), list):
+        sanitized["fix_steps"] = [
+            cleaned
+            for item in sanitized["fix_steps"]
+            if (cleaned := _strip_user_facing_artifact_lines(str(item)).strip())
+        ]
+    return sanitized
+
+
 def _finding_title(finding: dict[str, Any]) -> str:
     existing = str(finding.get("finding_report_title") or "").strip()
     if existing:
@@ -1078,7 +1066,11 @@ def _utc_now() -> str:
 
 
 def _extract_proposed_patch(markdown: str) -> str | None:
-    match = re.search(r"(?is)^#\s+(?:Proposed patch|수정 예시|패치 제안)\s*(.*?)(?:^#\s+|\Z)", markdown, flags=re.MULTILINE)
+    match = re.search(
+        r"(?is)^#{1,6}\s+(?:Proposed patch|수정 예시|패치 제안)\s*(.*?)(?:^#{1,6}\s+|\Z)",
+        markdown,
+        flags=re.MULTILINE,
+    )
     if not match:
         return None
     patch = match.group(1).strip()
@@ -1092,13 +1084,14 @@ def _ensure_remediation_sections(markdown: str, finding: dict[str, Any]) -> str:
     safe_example = str(finding.get("safe_example") or "").strip()
     code_snippet = str(finding.get("code_snippet") or "").strip()
 
-    if recommendation and not re.search(r"(?im)^#\s+수정 방법\s*$", markdown):
-        sections.append(f"# 수정 방법\n{recommendation}")
+    has_remediation_section = re.search(r"(?im)^#{1,6}\s+(?:어떻게 수정할까|수정 방법)\s*$", markdown)
+    if recommendation and not has_remediation_section:
+        sections.append(f"## 어떻게 수정할까\n{recommendation}")
     elif recommendation and recommendation not in markdown:
-        sections.append(f"# 보강 수정 권고\n{recommendation}")
+        sections.append(f"## 보강 수정 권고\n{recommendation}")
 
-    if safe_example and not re.search(r"(?im)^#\s+수정 예시\s*$", markdown):
-        sections.append(f"# 수정 예시\n{_build_static_diff_patch(code_snippet=code_snippet, safe_example=safe_example)}")
+    if safe_example and not re.search(r"(?im)^#{1,6}\s+수정 예시\s*$", markdown):
+        sections.append(f"## 수정 예시\n{_build_static_diff_patch(code_snippet=code_snippet, safe_example=safe_example)}")
 
     return "\n\n".join(section for section in sections if section)
 
@@ -1175,13 +1168,46 @@ def _parse_numbered_snippet_lines(code_snippet: str) -> list[dict[str, Any]]:
     ]
 
 
+_FORBIDDEN_USER_FACING_HEADINGS = re.compile(
+    r"(?i)^\s*#{1,6}\s*(?:요약|검증|검증\s*기준|검토\s*보고|근거와\s*코드\s*맥락|공격\s*경로\s*분석|가정)\s*$"
+)
+_FORBIDDEN_USER_FACING_LINE_PATTERNS = [
+    re.compile(r"(?i)finding(?:\s*\.|\s+json\b)?"),
+    re.compile(r"(?i)json"),
+    re.compile(r"(?i)(?:code_snippet|call_chain|call_chain_details|guideline_refs|source_link)"),
+    re.compile(r"런타임\s*검증|실제\s*공격\s*수행|실제\s*공격"),
+    re.compile(r"(?i)(?:CVE|CWE|CVSS)(?:[-_:]?\w+)?"),
+]
+
+
 def _clean_markdown(markdown: str) -> str:
     cleaned = re.sub(
         r"(?is)<\s*/?\s*(script|style|iframe|object|embed|form|input|button|textarea|select|option|meta|link)[^>]*>",
         "",
         markdown,
     )
+    cleaned = _strip_user_facing_artifact_lines(cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _strip_user_facing_artifact_lines(text: str) -> str:
+    lines: list[str] = []
+    in_fenced_code = False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fenced_code = not in_fenced_code
+            lines.append(line)
+            continue
+        if in_fenced_code:
+            lines.append(line)
+            continue
+        if _FORBIDDEN_USER_FACING_HEADINGS.search(line):
+            continue
+        if any(pattern.search(line) for pattern in _FORBIDDEN_USER_FACING_LINE_PATTERNS):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 def _is_context_limit_error(exc: Exception) -> bool:
     message = str(exc).lower()
