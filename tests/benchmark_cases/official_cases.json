@@ -40,14 +40,14 @@
     "notes": "OWASP marks this weak hash category case as non-vulnerable; the detector should not report WEAK_HASH."
   },
   {
-    "id": "owasp_cmdi_bad_00006_known_fn",
+    "id": "owasp_cmdi_bad_00006",
     "source": "OWASP BenchmarkJava",
     "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
     "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00006.java",
     "vulnerability_type": "COMMAND_INJECTION",
     "ground_truth_vulnerable": true,
-    "expected_detected": false,
-    "notes": "Known false negative: taint flows through a List and ProcessBuilder.command(argList), which is not tracked yet."
+    "expected_detected": true,
+    "notes": "Header input is copied into a command argument List and passed to ProcessBuilder.command(argList)."
   },
   {
     "id": "owasp_path_bad_00001_known_fn",

@@ -342,6 +342,61 @@ public class CryptoPolicyService {
     assert not any(finding["function"] == "safePasswordHash" for finding in findings)
 
 
+def test_command_injection_tracks_tainted_list_into_process_builder_command(tmp_path: Path) -> None:
+    sample = tmp_path / "CommandListController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.util.*;
+import javax.servlet.http.*;
+
+public class CommandListController {
+    public void unsafeListCommand(HttpServletRequest request) throws IOException {
+        String param = "";
+        if (request.getHeader("cmd") != null) {
+            param = request.getHeader("cmd");
+        }
+        param = java.net.URLDecoder.decode(param, "UTF-8");
+        List<String> argList = new ArrayList<>();
+        argList.add("sh");
+        argList.add("-c");
+        argList.add("echo " + param);
+        ProcessBuilder pb = new ProcessBuilder();
+        pb.command(argList);
+        pb.start();
+    }
+
+    public void safeConstantList() throws IOException {
+        List<String> argList = new ArrayList<>();
+        argList.add("sh");
+        argList.add("-c");
+        argList.add("echo safe");
+        ProcessBuilder pb = new ProcessBuilder();
+        pb.command(argList);
+        pb.start();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "COMMAND_INJECTION"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeListCommand"]
+    finding = findings[0]
+    assert "param" in finding["call_chain"][-1]
+    assert "argList" in finding["call_chain"][-1]
+    assert "ProcessBuilder.command" in finding["call_chain"][-1]
+    assert "명령 인자 컬렉션" in finding["evidence"]
+    assert "ProcessBuilder.command" in finding["confidence_reason"]
+    assert not any(finding["function"] == "safeConstantList" for finding in findings)
+
+
 def test_insecure_random_requires_security_context(tmp_path: Path) -> None:
     sample = tmp_path / "RandomPolicyService.java"
     sample.write_text(
