@@ -228,7 +228,7 @@ async def create_repository_analysis_job(
     service: AnalysisService = Depends(get_analysis_service),
     job_store: AnalysisJobStore = Depends(get_analysis_job_store),
 ) -> dict[str, str]:
-    job = job_store.create()
+    job = job_store.create(user_id=current_user.id)
     logger.bind(component="analysis.api", job_id=job["job_id"], user_id=current_user.id).info(
         "repository_analysis_job_created url={}",
         body.url,
@@ -247,9 +247,10 @@ async def create_repository_analysis_job(
 @router.get("/jobs/{job_id}", response_model=AnalysisJobStatusResponse)
 def get_repository_analysis_job(
     job_id: str,
+    current_user: UserResponse = Depends(get_current_user),
     job_store: AnalysisJobStore = Depends(get_analysis_job_store),
 ) -> dict[str, Any] | JSONResponse:
-    job = job_store.get(job_id)
+    job = job_store.get(job_id, user_id=current_user.id)
     if job is None:
         return JSONResponse(status_code=404, content={"error": "분석 작업을 찾을 수 없습니다"})
     return job

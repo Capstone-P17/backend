@@ -32,11 +32,9 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         return node.text.decode()
 
     def iter_methods(node):
-        if node.type == "method_declaration":
-            yield node
-            return
-        for child in node.children:
-            yield from iter_methods(child)
+        for child in iterate_all(node):
+            if child.type == "method_declaration":
+                yield child
 
     def collect_upload_vars(method_node):
         method_text = text(method_node)

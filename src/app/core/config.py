@@ -16,6 +16,8 @@ DEFAULT_SYSTEM_PROMPT = (
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 DEFAULT_MAX_ARCHIVE_MEMBERS = 5000
+DEFAULT_MAX_ANALYSIS_JAVA_FILES = 5000
+DEFAULT_MAX_ANALYSIS_FILE_BYTES = 1 * 1024 * 1024
 
 
 class Settings(BaseModel):
@@ -206,6 +208,22 @@ class Settings(BaseModel):
         default=DEFAULT_MAX_ARCHIVE_MEMBERS,
         ge=1,
         validation_alias=AliasChoices("MAX_ARCHIVE_MEMBERS", "AGENT_MAX_ARCHIVE_MEMBERS"),
+    )
+    max_analysis_java_files: int = Field(
+        default=DEFAULT_MAX_ANALYSIS_JAVA_FILES,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MAX_ANALYSIS_JAVA_FILES",
+            "AGENT_MAX_ANALYSIS_JAVA_FILES",
+        ),
+    )
+    max_analysis_file_bytes: int = Field(
+        default=DEFAULT_MAX_ANALYSIS_FILE_BYTES,
+        ge=1,
+        validation_alias=AliasChoices(
+            "MAX_ANALYSIS_FILE_BYTES",
+            "AGENT_MAX_ANALYSIS_FILE_BYTES",
+        ),
     )
 
     default_agent_name: str = Field(

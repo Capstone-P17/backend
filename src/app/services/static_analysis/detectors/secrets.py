@@ -184,7 +184,7 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
     vulnerabilities = []
     candidates = {}
 
-    def visit(node):
+    for node in iterate_all(tree.root_node):
         if node.type in ("field_declaration", "local_variable_declaration"):
             for child in node.children:
                 if child.type == "variable_declarator":
@@ -209,10 +209,6 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
                                 "has_keyword": has_keyword,
                                 "has_value_pattern": has_value_pattern,
                             }
-        for child in node.children:
-            visit(child)
-
-    visit(tree.root_node)
 
     usages = {}
     for node in iterate_all(tree.root_node):

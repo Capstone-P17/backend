@@ -74,3 +74,11 @@ def test_repository_job_failure_path(client, analysis_service) -> None:
 
 def test_unknown_job_returns_404(client) -> None:
     assert client.get("/analyze/jobs/missing").status_code == 404
+
+
+def test_job_status_is_scoped_to_owner(client, job_store) -> None:
+    job = job_store.create(user_id=99)
+
+    response = client.get(f"/analyze/jobs/{job['job_id']}")
+
+    assert response.status_code == 404

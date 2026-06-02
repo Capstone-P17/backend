@@ -29,9 +29,11 @@ def find_parent_class(node):
 
 
 def iterate_all(node):
-    yield node
-    for child in node.children:
-        yield from iterate_all(child)
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(reversed(current.children))
 
 
 def parse_file(filepath):

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import re
+import shutil
+import stat
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import quote
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
 _GITHUB_REPO_URL_RE = re.compile(
     r"^https://github\.com/(?P<owner>[A-Za-z0-9_.\-]+)/(?P<repo>[A-Za-z0-9_.\-]+?)(?:\.git)?$"
 )
+_GITHUB_REPO_API_URL = "https://api.github.com/repos/{owner}/{repo}"
 _GITHUB_ARCHIVE_URL = "https://github.com/{owner}/{repo}/archive/refs/heads/{branch}.zip"
 _DEFAULT_BRANCHES = ("main", "master")
 _CLONE_TIMEOUT_SECONDS = 60
@@ -343,49 +346,58 @@ class AnalysisService:
             )
 
     def _download_github_archive(self, owner: str, repo: str) -> tuple[bytes, str]:
-        """GitHub archive zip을 다운로드합니다. main 브랜치를 먼저 시도하고 실패 시 master를 시도합니다."""
+        """GitHub archive zip을 다운로드합니다.
+
+        GitHub API에서 default_branch를 먼저 확인하고, API 실패나 브랜치 미존재 시
+        main/master fallback을 시도합니다.
+        """
         last_exc: Exception | None = None
-        for branch in _DEFAULT_BRANCHES:
-            archive_url = _GITHUB_ARCHIVE_URL.format(owner=owner, repo=repo, branch=branch)
-            try:
-                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
-                    "github_archive_download_started url={}",
-                    archive_url,
+        with httpx.Client(follow_redirects=True, timeout=_CLONE_TIMEOUT_SECONDS) as client:
+            default_branch = self._fetch_github_default_branch(client, owner, repo)
+            for branch in self._github_archive_branch_candidates(default_branch):
+                archive_url = _GITHUB_ARCHIVE_URL.format(
+                    owner=owner,
+                    repo=repo,
+                    branch=quote(branch, safe="/"),
                 )
-                with httpx.Client(follow_redirects=True, timeout=_CLONE_TIMEOUT_SECONDS) as client:
-                    response = client.get(archive_url)
-                if response.status_code == 200:
-                    self._validate_upload_size(len(response.content))
+                try:
                     logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
-                        "github_archive_download_succeeded bytes={}",
-                        len(response.content),
+                        "github_archive_download_started url={}",
+                        archive_url,
                     )
-                    return response.content, branch
-                if response.status_code == 404:
-                    logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).debug(
-                        "github_archive_branch_not_found"
+                    response = client.get(archive_url)
+                    if response.status_code == 200:
+                        self._validate_upload_size(len(response.content))
+                        logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
+                            "github_archive_download_succeeded bytes={}",
+                            len(response.content),
+                        )
+                        return response.content, branch
+                    if response.status_code == 404:
+                        logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).debug(
+                            "github_archive_branch_not_found"
+                        )
+                        continue
+                    logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
+                        "github_archive_download_failed status={}",
+                        response.status_code,
                     )
-                    continue
-                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
-                    "github_archive_download_failed status={}",
-                    response.status_code,
-                )
-                raise GitHubRepositoryCloneError(
-                    f"GitHub 레포지토리 다운로드 실패 (HTTP {response.status_code})"
-                )
-            except httpx.TimeoutException as exc:
-                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
-                    "github_archive_download_timeout"
-                )
-                raise GitHubRepositoryCloneError(
-                    "GitHub 레포지토리 다운로드 시간이 초과되었습니다"
-                ) from exc
-            except httpx.RequestError as exc:
-                logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
-                    "github_archive_request_error error={}",
-                    str(exc) or type(exc).__name__,
-                )
-                last_exc = exc
+                    raise GitHubRepositoryCloneError(
+                        f"GitHub 레포지토리 다운로드 실패 (HTTP {response.status_code})"
+                    )
+                except httpx.TimeoutException as exc:
+                    logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
+                        "github_archive_download_timeout"
+                    )
+                    raise GitHubRepositoryCloneError(
+                        "GitHub 레포지토리 다운로드 시간이 초과되었습니다"
+                    ) from exc
+                except httpx.RequestError as exc:
+                    logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
+                        "github_archive_request_error error={}",
+                        str(exc) or type(exc).__name__,
+                    )
+                    last_exc = exc
 
         if last_exc:
             raise GitHubRepositoryCloneError(
@@ -394,6 +406,59 @@ class AnalysisService:
         raise InvalidGitHubRepositoryError(
             f"레포지토리를 찾을 수 없습니다: github.com/{owner}/{repo}"
         )
+
+    def _fetch_github_default_branch(self, client: httpx.Client, owner: str, repo: str) -> str | None:
+        api_url = _GITHUB_REPO_API_URL.format(owner=owner, repo=repo)
+        try:
+            logger.bind(component="analysis.github", repository=f"{owner}/{repo}").info(
+                "github_default_branch_lookup_started url={}",
+                api_url,
+            )
+            response = client.get(api_url, headers={"Accept": "application/vnd.github+json"})
+            if response.status_code != 200:
+                logger.bind(component="analysis.github", repository=f"{owner}/{repo}").warning(
+                    "github_default_branch_lookup_failed status={}",
+                    response.status_code,
+                )
+                return None
+            payload = response.json()
+        except ValueError as exc:
+            logger.bind(component="analysis.github", repository=f"{owner}/{repo}").warning(
+                "github_default_branch_lookup_invalid_json error={}",
+                str(exc) or type(exc).__name__,
+            )
+            return None
+        except httpx.TimeoutException:
+            logger.bind(component="analysis.github", repository=f"{owner}/{repo}").warning(
+                "github_default_branch_lookup_timeout"
+            )
+            return None
+        except httpx.RequestError as exc:
+            logger.bind(component="analysis.github", repository=f"{owner}/{repo}").warning(
+                "github_default_branch_lookup_request_error error={}",
+                str(exc) or type(exc).__name__,
+            )
+            return None
+
+        default_branch = payload.get("default_branch") if isinstance(payload, dict) else None
+        if not isinstance(default_branch, str) or not default_branch.strip():
+            logger.bind(component="analysis.github", repository=f"{owner}/{repo}").warning(
+                "github_default_branch_lookup_missing"
+            )
+            return None
+        branch = default_branch.strip()
+        logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
+            "github_default_branch_lookup_succeeded"
+        )
+        return branch
+
+    @staticmethod
+    def _github_archive_branch_candidates(default_branch: str | None) -> list[str]:
+        branches = []
+        for branch in (default_branch, *_DEFAULT_BRANCHES):
+            if branch and branch not in branches:
+                branches.append(branch)
+        return branches
 
     def get_latest_result(self, user_id: int) -> dict[str, object]:
         logger.bind(component="analysis.service", user_id=user_id).debug("latest_result_lookup_started")
@@ -559,9 +624,10 @@ class AnalysisService:
                 if not members:
                     raise InvalidRepositoryArchiveError("압축 파일이 비어 있습니다")
                 self._validate_archive_limits(members)
+                resolved_extract_root = extract_root.resolve()
                 for member in members:
                     self._validate_archive_member_path(member.filename)
-                archive_file.extractall(extract_root)
+                    self._extract_archive_member(archive_file, member, resolved_extract_root)
                 logger.bind(component="analysis.archive").info(
                     "archive_extract_finished archive={} members={}",
                     archive_path.name,
@@ -589,12 +655,51 @@ class AnalysisService:
 
     @staticmethod
     def _validate_archive_member_path(member_name: str) -> None:
-        target_path = Path(member_name)
-        if target_path.is_absolute() or ".." in target_path.parts:
+        AnalysisService._archive_member_parts(member_name)
+
+    @staticmethod
+    def _archive_member_parts(member_name: str) -> tuple[str, ...]:
+        normalized = member_name.replace("\\", "/").strip()
+        target_path = PurePosixPath(normalized)
+        if (
+            not normalized
+            or normalized.startswith("/")
+            or target_path.is_absolute()
+            or any(part in ("", ".", "..") for part in target_path.parts)
+        ):
             raise InvalidRepositoryArchiveError("압축 파일 경로가 올바르지 않습니다")
+        return target_path.parts
+
+    @staticmethod
+    def _is_archive_symlink(member: ZipInfo) -> bool:
+        unix_mode = (member.external_attr >> 16) & 0xFFFF
+        return stat.S_ISLNK(unix_mode)
+
+    @staticmethod
+    def _assert_path_inside_root(path: Path, root: Path) -> None:
+        if path != root and root not in path.parents:
+            raise InvalidRepositoryArchiveError("압축 파일 경로가 작업 디렉토리를 벗어납니다")
+
+    def _archive_member_target_path(self, extract_root: Path, member_name: str) -> Path:
+        target_path = (extract_root / Path(*self._archive_member_parts(member_name))).resolve()
+        self._assert_path_inside_root(target_path, extract_root)
+        return target_path
+
+    def _extract_archive_member(self, archive_file: ZipFile, member: ZipInfo, extract_root: Path) -> None:
+        if self._is_archive_symlink(member):
+            raise InvalidRepositoryArchiveError("압축 파일에 심볼릭 링크가 포함되어 분석할 수 없습니다")
+
+        target_path = self._archive_member_target_path(extract_root, member.filename)
+        if member.is_dir():
+            target_path.mkdir(parents=True, exist_ok=True)
+            return
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with archive_file.open(member) as source, target_path.open("wb") as target:
+            shutil.copyfileobj(source, target)
 
     def _resolve_repository_analysis_root(self, extract_root: Path) -> Path:
-        java_files = sorted(extract_root.rglob("*.java"))
+        java_files = self._collect_safe_java_files(extract_root)
         if not java_files:
             raise InvalidRepositoryArchiveError("분석할 Java 파일이 없습니다")
 
@@ -604,9 +709,34 @@ class AnalysisService:
         top_level_files = [path for path in extract_root.iterdir() if path.is_file()]
         if len(top_level_directories) == 1 and not top_level_files:
             nested_root = top_level_directories[0]
-            if any(nested_root.rglob("*.java")):
+            nested_root_resolved = nested_root.resolve()
+            if any(path == nested_root_resolved or nested_root_resolved in path.parents for path in java_files):
                 return nested_root
         return extract_root
+
+    def _collect_safe_java_files(self, root: Path) -> list[Path]:
+        resolved_root = root.resolve()
+        java_files: list[Path] = []
+        for candidate in sorted(root.rglob("*.java")):
+            if candidate.is_symlink():
+                raise InvalidRepositoryArchiveError("심볼릭 링크 Java 파일은 분석할 수 없습니다")
+            try:
+                resolved_candidate = candidate.resolve(strict=True)
+                stat_result = resolved_candidate.stat()
+            except OSError as exc:
+                raise InvalidRepositoryArchiveError("분석 파일 경로를 확인할 수 없습니다") from exc
+            self._assert_path_inside_root(resolved_candidate, resolved_root)
+            if not resolved_candidate.is_file():
+                continue
+            if stat_result.st_size > self.settings.max_analysis_file_bytes:
+                max_kb = max(1, self.settings.max_analysis_file_bytes // 1024)
+                raise InvalidRepositoryArchiveError(f"Java 파일 하나의 크기는 최대 {max_kb}KB까지 허용됩니다")
+            java_files.append(resolved_candidate)
+            if len(java_files) > self.settings.max_analysis_java_files:
+                raise InvalidRepositoryArchiveError(
+                    f"분석 가능한 Java 파일 수는 최대 {self.settings.max_analysis_java_files}개입니다"
+                )
+        return java_files
 
     @staticmethod
     def _attach_source_metadata(result: dict[str, object], prepared_target: PreparedAnalysisTarget) -> None:

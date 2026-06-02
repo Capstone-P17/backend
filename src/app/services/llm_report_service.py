@@ -1088,7 +1088,7 @@ def _ensure_remediation_sections(markdown: str, finding: dict[str, Any]) -> str:
     if recommendation and not has_remediation_section:
         sections.append(f"## 어떻게 수정할까\n{recommendation}")
     elif recommendation and recommendation not in markdown:
-        sections.append(f"## 보강 수정 권고\n{recommendation}")
+        sections.append(f"## 추가 수정 권고\n{recommendation}")
 
     if safe_example and not re.search(r"(?im)^#{1,6}\s+수정 예시\s*$", markdown):
         sections.append(f"## 수정 예시\n{_build_static_diff_patch(code_snippet=code_snippet, safe_example=safe_example)}")

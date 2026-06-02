@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import stat
 from io import BytesIO
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import pytest
 
+import src.app.services.analysis_service as analysis_service_module
 from src.app.core.config import get_settings
 from src.app.services.analysis_service import AnalysisService, InvalidRepositoryArchiveError, UploadTooLargeError
 from src.app.services.analyzer_service import AnalyzerService
@@ -21,6 +23,17 @@ def zip_bytes() -> bytes:
     buffer = BytesIO()
     with ZipFile(buffer, "w") as archive:
         archive.writestr("repo/Safe.java", java_bytes())
+    return buffer.getvalue()
+
+
+def zip_bytes_with_entries(entries: dict[str, bytes | ZipInfo]) -> bytes:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        for name, content in entries.items():
+            if isinstance(content, ZipInfo):
+                archive.writestr(content, b"target")
+            else:
+                archive.writestr(name, content)
     return buffer.getvalue()
 
 
@@ -71,11 +84,223 @@ def test_uploaded_repository_rejects_uncompressed_zip_limit() -> None:
         service.analyze_uploaded_repository("repo.zip", oversized_zip_bytes(), user_id=1)
 
 
+def test_uploaded_repository_rejects_zip_slip_member() -> None:
+    settings = get_settings()
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+
+    with pytest.raises(InvalidRepositoryArchiveError):
+        service.analyze_uploaded_repository(
+            "repo.zip",
+            zip_bytes_with_entries({"../Evil.java": java_bytes()}),
+            user_id=1,
+        )
+
+
+def test_uploaded_repository_rejects_absolute_member_path() -> None:
+    settings = get_settings()
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+
+    with pytest.raises(InvalidRepositoryArchiveError):
+        service.analyze_uploaded_repository(
+            "repo.zip",
+            zip_bytes_with_entries({"/tmp/Evil.java": java_bytes()}),
+            user_id=1,
+        )
+
+
+def test_uploaded_repository_rejects_symlink_member() -> None:
+    settings = get_settings()
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+    symlink = ZipInfo("repo/Linked.java")
+    symlink.external_attr = (stat.S_IFLNK | 0o777) << 16
+
+    with pytest.raises(InvalidRepositoryArchiveError):
+        service.analyze_uploaded_repository(
+            "repo.zip",
+            zip_bytes_with_entries({"repo/Linked.java": symlink}),
+            user_id=1,
+        )
+
+
+def test_uploaded_repository_rejects_java_file_count_limit() -> None:
+    settings = get_settings().model_copy(update={"max_analysis_java_files": 1})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+
+    with pytest.raises(InvalidRepositoryArchiveError):
+        service.analyze_uploaded_repository(
+            "repo.zip",
+            zip_bytes_with_entries(
+                {
+                    "repo/One.java": java_bytes(),
+                    "repo/Two.java": java_bytes(),
+                }
+            ),
+            user_id=1,
+        )
+
+
+def test_uploaded_repository_rejects_large_java_file() -> None:
+    settings = get_settings().model_copy(update={"max_analysis_file_bytes": 8})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+
+    with pytest.raises(InvalidRepositoryArchiveError):
+        service.analyze_uploaded_repository(
+            "repo.zip",
+            zip_bytes_with_entries({"repo/Large.java": java_bytes()}),
+            user_id=1,
+        )
+
+
 def test_github_repository_returns_analysis_id_envelope_without_network(monkeypatch, analysis_service: AnalysisService) -> None:
     monkeypatch.setattr(analysis_service, "_download_github_archive", lambda owner, repo: (zip_bytes(), "main"))
     assert_analysis_response(analysis_service.analyze_github_repository("https://github.com/acme/repo", user_id=1))
 
 
+class FakeGitHubResponse:
+    def __init__(self, status_code: int, *, content: bytes = b"", payload: dict | None = None) -> None:
+        self.status_code = status_code
+        self.content = content
+        self._payload = payload
+
+    def json(self) -> dict:
+        if self._payload is None:
+            raise ValueError("no json payload")
+        return self._payload
+
+
+class FakeGitHubClient:
+    def __init__(self, responses: dict[str, FakeGitHubResponse], requests: list[str]) -> None:
+        self.responses = responses
+        self.requests = requests
+
+    def __enter__(self) -> "FakeGitHubClient":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def get(self, url: str, **kwargs) -> FakeGitHubResponse:
+        self.requests.append(url)
+        return self.responses.get(url, FakeGitHubResponse(404))
+
+
+def install_fake_github_client(
+    monkeypatch: pytest.MonkeyPatch,
+    responses: dict[str, FakeGitHubResponse],
+) -> list[str]:
+    requests: list[str] = []
+
+    def fake_client(*args, **kwargs) -> FakeGitHubClient:
+        return FakeGitHubClient(responses, requests)
+
+    monkeypatch.setattr(analysis_service_module.httpx, "Client", fake_client)
+    return requests
+
+
+def test_github_archive_downloads_default_branch_from_github_api(
+    monkeypatch: pytest.MonkeyPatch,
+    analysis_service: AnalysisService,
+) -> None:
+    archive = zip_bytes()
+    requests = install_fake_github_client(
+        monkeypatch,
+        {
+            "https://api.github.com/repos/acme/repo": FakeGitHubResponse(
+                200,
+                payload={"default_branch": "main-v2"},
+            ),
+            "https://github.com/acme/repo/archive/refs/heads/main-v2.zip": FakeGitHubResponse(
+                200,
+                content=archive,
+            ),
+        },
+    )
+
+    content, branch = analysis_service._download_github_archive("acme", "repo")
+
+    assert content == archive
+    assert branch == "main-v2"
+    assert requests == [
+        "https://api.github.com/repos/acme/repo",
+        "https://github.com/acme/repo/archive/refs/heads/main-v2.zip",
+    ]
+
+
+def test_github_archive_falls_back_when_default_branch_archive_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    analysis_service: AnalysisService,
+) -> None:
+    archive = zip_bytes()
+    requests = install_fake_github_client(
+        monkeypatch,
+        {
+            "https://api.github.com/repos/acme/repo": FakeGitHubResponse(
+                200,
+                payload={"default_branch": "develop"},
+            ),
+            "https://github.com/acme/repo/archive/refs/heads/develop.zip": FakeGitHubResponse(404),
+            "https://github.com/acme/repo/archive/refs/heads/main.zip": FakeGitHubResponse(
+                200,
+                content=archive,
+            ),
+        },
+    )
+
+    content, branch = analysis_service._download_github_archive("acme", "repo")
+
+    assert content == archive
+    assert branch == "main"
+    assert requests == [
+        "https://api.github.com/repos/acme/repo",
+        "https://github.com/acme/repo/archive/refs/heads/develop.zip",
+        "https://github.com/acme/repo/archive/refs/heads/main.zip",
+    ]
+
+
+def test_github_archive_falls_back_when_default_branch_lookup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    analysis_service: AnalysisService,
+) -> None:
+    archive = zip_bytes()
+    requests = install_fake_github_client(
+        monkeypatch,
+        {
+            "https://api.github.com/repos/acme/repo": FakeGitHubResponse(403),
+            "https://github.com/acme/repo/archive/refs/heads/main.zip": FakeGitHubResponse(
+                200,
+                content=archive,
+            ),
+        },
+    )
+
+    content, branch = analysis_service._download_github_archive("acme", "repo")
+
+    assert content == archive
+    assert branch == "main"
+    assert requests == [
+        "https://api.github.com/repos/acme/repo",
+        "https://github.com/acme/repo/archive/refs/heads/main.zip",
+    ]
 
 
 def test_github_repository_attaches_blob_source_links(monkeypatch) -> None:

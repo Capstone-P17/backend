@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
-from src.app.services.static_analysis.parser import find_parent_class, find_parent_method
+from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 
 INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
 
@@ -11,17 +11,17 @@ def detect_command_injection(filepath, tree, vuln_counter):
     tainted_vars = {}
 
     def contains_input_method(node):
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node and name_node.text.decode() in INPUT_METHODS:
-                return True
-        for child in node.children:
-            if contains_input_method(child):
-                return True
+        for child in iterate_all(node):
+            if child.type == "method_invocation":
+                name_node = child.child_by_field_name("name")
+                if name_node and name_node.text.decode() in INPUT_METHODS:
+                    return True
         return False
 
-    def collect_tainted_vars(node):
-        if node.type in ("local_variable_declaration", "field_declaration"):
+    def collect_tainted_vars(root):
+        for node in iterate_all(root):
+            if node.type not in ("local_variable_declaration", "field_declaration"):
+                continue
             for child in node.children:
                 if child.type == "variable_declarator":
                     name_node = child.child_by_field_name("name")
@@ -31,8 +31,6 @@ def detect_command_injection(filepath, tree, vuln_counter):
                             "line": name_node.start_point[0] + 1,
                             "code": node.text.decode().strip(),
                         }
-        for child in node.children:
-            collect_tainted_vars(child)
 
     def build_evidence(tainted_var, sink_desc):
         source = tainted_vars.get(tainted_var, {})
@@ -77,31 +75,29 @@ def detect_command_injection(filepath, tree, vuln_counter):
             }
         )
 
-    def find_command_injection(node):
-        text = node.text.decode()
+    def find_command_injection(root):
+        for node in iterate_all(root):
+            text = node.text.decode()
 
-        # Runtime.getRuntime().exec(tainted) 또는 Runtime.exec(tainted)
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            args_node = node.child_by_field_name("arguments")
-            if name_node and name_node.text.decode() == "exec" and args_node:
-                if "Runtime" in text:
-                    args_text = args_node.text.decode()
+            # Runtime.getRuntime().exec(tainted) 또는 Runtime.exec(tainted)
+            if node.type == "method_invocation":
+                name_node = node.child_by_field_name("name")
+                args_node = node.child_by_field_name("arguments")
+                if name_node and name_node.text.decode() == "exec" and args_node:
+                    if "Runtime" in text:
+                        args_text = args_node.text.decode()
+                        for var in tainted_vars:
+                            if var in args_text:
+                                report(node, var, "Runtime.exec(...)")
+                                break
+
+            # new ProcessBuilder(tainted) 또는 new ProcessBuilder(Arrays.asList(tainted, ...))
+            if node.type == "object_creation_expression":
+                if "ProcessBuilder" in text:
                     for var in tainted_vars:
-                        if var in args_text:
-                            report(node, var, "Runtime.exec(...)")
-                            return
-
-        # new ProcessBuilder(tainted) 또는 new ProcessBuilder(Arrays.asList(tainted, ...))
-        if node.type == "object_creation_expression":
-            if "ProcessBuilder" in text:
-                for var in tainted_vars:
-                    if var in text:
-                        report(node, var, "new ProcessBuilder(...)")
-                        return
-
-        for child in node.children:
-            find_command_injection(child)
+                        if var in text:
+                            report(node, var, "new ProcessBuilder(...)")
+                            break
 
     collect_tainted_vars(tree.root_node)
     find_command_injection(tree.root_node)

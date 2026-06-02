@@ -21,11 +21,9 @@ def detect_sql_injection(filepath, tree, vuln_counter):
         return node.text.decode()
 
     def iter_methods(node):
-        if node.type == "method_declaration":
-            yield node
-            return
-        for child in node.children:
-            yield from iter_methods(child)
+        for child in iterate_all(node):
+            if child.type == "method_declaration":
+                yield child
 
     def identifiers(node):
         return {text(child) for child in iterate_all(node) if child.type == "identifier"}
@@ -49,34 +47,28 @@ def detect_sql_injection(filepath, tree, vuln_counter):
         return text(name_node) if name_node else None
 
     def find_input_call(node):
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node and text(name_node) in INPUT_METHODS:
-                return node
-        for child in node.children:
-            found = find_input_call(child)
-            if found:
-                return found
+        for child in iterate_all(node):
+            if child.type == "method_invocation":
+                name_node = child.child_by_field_name("name")
+                if name_node and text(name_node) in INPUT_METHODS:
+                    return child
         return None
 
     def contains_sql_keyword(node):
         return any(keyword in text(node).upper() for keyword in SQL_KEYWORDS)
 
     def contains_input_method(node):
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node and text(name_node) in INPUT_METHODS:
-                return True
-        return any(contains_input_method(child) for child in node.children)
+        return find_input_call(node) is not None
 
     def contains_sql_builder(node):
-        if node.type == "binary_expression" and "+" in text(node):
-            return True
-        if node.type == "method_invocation":
-            name = method_name(node)
-            if name in SQL_BUILDER_METHODS:
+        for child in iterate_all(node):
+            if child.type == "binary_expression" and "+" in text(child):
                 return True
-        return any(contains_sql_builder(child) for child in node.children)
+            if child.type == "method_invocation":
+                name = method_name(child)
+                if name in SQL_BUILDER_METHODS:
+                    return True
+        return False
 
     def collect_parameter_names(method_node):
         params = set()
@@ -135,29 +127,31 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                 return ", ".join(taint_sources.get(var_name, f"`{var_name}`") for var_name in source_vars)
             return "외부 입력 값"
 
-        def visit(node):
-            if node.type == "method_declaration" and node is not method_node:
-                return
+        def visit_method_nodes():
+            stack = [method_node]
+            while stack:
+                node = stack.pop()
+                if node.type == "method_declaration" and node is not method_node:
+                    continue
 
-            if node.type in ("local_variable_declaration", "field_declaration"):
-                for child in node.children:
-                    if child.type == "variable_declarator":
-                        name_node = child.child_by_field_name("name")
-                        value_node = child.child_by_field_name("value")
-                        if name_node and value_node:
-                            update_variable(text(name_node), value_node, node)
+                if node.type in ("local_variable_declaration", "field_declaration"):
+                    for child in node.children:
+                        if child.type == "variable_declarator":
+                            name_node = child.child_by_field_name("name")
+                            value_node = child.child_by_field_name("value")
+                            if name_node and value_node:
+                                update_variable(text(name_node), value_node, node)
 
-            if node.type == "assignment_expression":
-                left = node.child_by_field_name("left")
-                right = node.child_by_field_name("right")
-                if left and right and left.type == "identifier":
-                    update_variable(text(left), right, node)
+                if node.type == "assignment_expression":
+                    left = node.child_by_field_name("left")
+                    right = node.child_by_field_name("right")
+                    if left and right and left.type == "identifier":
+                        update_variable(text(left), right, node)
 
-            if node.type == "method_invocation":
-                inspect_sql_sink(node)
+                if node.type == "method_invocation":
+                    inspect_sql_sink(node)
 
-            for child in node.children:
-                visit(child)
+                stack.extend(reversed(node.children))
 
         def inspect_sql_sink(node):
             name = method_name(node)
@@ -250,7 +244,7 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                 }
             )
 
-        visit(method_node)
+        visit_method_nodes()
 
     def build_call_chain(node, sql_var=None):
         chain = []

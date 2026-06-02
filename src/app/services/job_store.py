@@ -14,10 +14,11 @@ class AnalysisJobStore:
     def __init__(self) -> None:
         self._jobs: dict[str, dict[str, Any]] = {}
 
-    def create(self) -> dict[str, Any]:
+    def create(self, *, user_id: int) -> dict[str, Any]:
         now = self._now()
         job = {
             "job_id": str(uuid4()),
+            "owner_user_id": user_id,
             "status": "queued",
             "phase": "queued",
             "message": "분석 작업이 대기열에 등록되었습니다.",
@@ -37,9 +38,11 @@ class AnalysisJobStore:
         self._jobs[job["job_id"]] = deepcopy(job)
         return deepcopy(job)
 
-    def get(self, job_id: str) -> dict[str, Any] | None:
+    def get(self, job_id: str, *, user_id: int) -> dict[str, Any] | None:
         job = self._jobs.get(job_id)
         if job is None:
+            return None
+        if job.get("owner_user_id") != user_id:
             return None
         return deepcopy(job)
 

@@ -32,41 +32,27 @@ def detect_xss(filepath, tree, vuln_counter):
         return node.text.decode()
 
     def iter_methods(node):
-        if node.type == "method_declaration":
-            yield node
-            return
-        for child in node.children:
-            yield from iter_methods(child)
+        for child in iterate_all(node):
+            if child.type == "method_declaration":
+                yield child
 
     def contains_input_method(node):
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node and text(name_node) in INPUT_METHODS:
-                return True
-        for child in node.children:
-            if contains_input_method(child):
-                return True
-        return False
+        return find_input_call(node) is not None
 
     def contains_sanitizer(node):
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node and text(name_node) in SANITIZER_METHODS:
-                return True
-        for child in node.children:
-            if contains_sanitizer(child):
-                return True
+        for child in iterate_all(node):
+            if child.type == "method_invocation":
+                name_node = child.child_by_field_name("name")
+                if name_node and text(name_node) in SANITIZER_METHODS:
+                    return True
         return False
 
     def find_input_call(node):
-        if node.type == "method_invocation":
-            name_node = node.child_by_field_name("name")
-            if name_node and text(name_node) in INPUT_METHODS:
-                return node
-        for child in node.children:
-            found = find_input_call(child)
-            if found:
-                return found
+        for child in iterate_all(node):
+            if child.type == "method_invocation":
+                name_node = child.child_by_field_name("name")
+                if name_node and text(name_node) in INPUT_METHODS:
+                    return child
         return None
 
     def identifiers(node):
@@ -112,31 +98,33 @@ def detect_xss(filepath, tree, vuln_counter):
             else:
                 clear_tracking(var_name)
 
-        def visit(node):
-            if node.type == "method_declaration" and node is not method_node:
-                return
+        def visit_method_nodes():
+            stack = [method_node]
+            while stack:
+                node = stack.pop()
+                if node.type == "method_declaration" and node is not method_node:
+                    continue
 
-            if node.type in ("local_variable_declaration", "field_declaration"):
-                for child in node.children:
-                    if child.type == "variable_declarator":
-                        name_node = child.child_by_field_name("name")
-                        value_node = child.child_by_field_name("value")
-                        if name_node and value_node:
-                            update_variable(text(name_node), value_node, node)
-                return
+                if node.type in ("local_variable_declaration", "field_declaration"):
+                    for child in node.children:
+                        if child.type == "variable_declarator":
+                            name_node = child.child_by_field_name("name")
+                            value_node = child.child_by_field_name("value")
+                            if name_node and value_node:
+                                update_variable(text(name_node), value_node, node)
+                    continue
 
-            if node.type == "assignment_expression":
-                left = node.child_by_field_name("left")
-                right = node.child_by_field_name("right")
-                if left and right and left.type == "identifier":
-                    update_variable(text(left), right, node)
-                return
+                if node.type == "assignment_expression":
+                    left = node.child_by_field_name("left")
+                    right = node.child_by_field_name("right")
+                    if left and right and left.type == "identifier":
+                        update_variable(text(left), right, node)
+                    continue
 
-            if node.type == "method_invocation":
-                inspect_output(node)
+                if node.type == "method_invocation":
+                    inspect_output(node)
 
-            for child in node.children:
-                visit(child)
+                stack.extend(reversed(node.children))
 
         def inspect_output(node):
             name_node = node.child_by_field_name("name")
@@ -188,13 +176,11 @@ def detect_xss(filepath, tree, vuln_counter):
                     }
                 )
 
-        visit(method_node)
+        visit_method_nodes()
 
     def contains_binary_expression(node):
-        if node.type == "binary_expression":
-            return True
-        for child in node.children:
-            if contains_binary_expression(child):
+        for child in iterate_all(node):
+            if child.type == "binary_expression":
                 return True
         return False
 
