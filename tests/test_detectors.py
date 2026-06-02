@@ -471,6 +471,11 @@ public class SqlFlowController {
         return stmt.executeQuery(query);
     }
 
+    public int unsafeUpdate(String username, Statement stmt) throws Exception {
+        String query = "UPDATE users SET name = '" + username + "'";
+        return stmt.executeUpdate(query);
+    }
+
     public ResultSet safePrepared(String userId, Connection conn) throws Exception {
         PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
         ps.setString(1, userId);
@@ -480,6 +485,23 @@ public class SqlFlowController {
     public ResultSet safeConstantConcat(Statement stmt) throws Exception {
         String query = "SELECT * " + "FROM users";
         return stmt.executeQuery(query);
+    }
+
+    public ResultSet safeSelectedWord(String userId, Statement stmt) throws Exception {
+        String query = "User selected " + userId;
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet safeSqlKeywordInComment(String userId, Statement stmt) throws Exception {
+        // SELECT * FROM users WHERE id = user input
+        String query = "not a query " + userId;
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet safeLogMessage(String userId, Statement stmt) throws Exception {
+        String message = "SELECT request for " + userId;
+        System.out.println(message);
+        return stmt.executeQuery("SELECT * FROM audit_log");
     }
 }
 """.strip(),
@@ -497,8 +519,12 @@ public class SqlFlowController {
         "unsafeConcat",
         "unsafeFormat",
         "unsafeConcatMethod",
+        "unsafeUpdate",
     ]
-    assert all("executeQuery" in finding["call_chain"][-1] for finding in findings)
+    assert all(
+        any(method in finding["call_chain"][-1] for method in ("executeQuery", "executeUpdate"))
+        for finding in findings
+    )
     assert all(finding["call_chain_details"] for finding in findings)
     assert findings[0]["call_chain_details"][0]["kind"] == "function"
     assert findings[0]["call_chain_details"][0]["file"] == "SqlFlowController.java"
@@ -506,7 +532,7 @@ public class SqlFlowController {
     assert findings[0]["call_chain_details"][-1]["kind"] == "sink"
     assert findings[0]["call_chain_details"][-1]["line"] > findings[0]["line"]
     assert "executeQuery" in findings[0]["call_chain_details"][-1]["label"]
-    assert all("executeQuery" in finding["evidence"] for finding in findings)
+    assert all(any(method in finding["evidence"] for method in ("executeQuery", "executeUpdate")) for finding in findings)
     assert any("String.format" in finding["code_snippet"] for finding in findings)
     assert all("|" in finding["code_snippet"] for finding in findings)
     unsafe_concat = findings[0]["code_snippet"]

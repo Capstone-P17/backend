@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import (
     find_parent_class,
@@ -11,8 +13,10 @@ SQL_EXEC_METHODS = ["executeQuery", "executeUpdate", "execute"]
 SQL_PREPARE_METHODS = ["prepareStatement"]
 SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS
 SQL_KEYWORDS = ["SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE"]
+SQL_KEYWORD_PATTERN = re.compile(r"\b(?:" + "|".join(SQL_KEYWORDS) + r")\b", re.IGNORECASE)
 INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
 SQL_BUILDER_METHODS = ["format", "formatted", "concat"]
+SQL_LITERAL_NODE_TYPES = {"string_literal", "text_block"}
 
 def detect_sql_injection(filepath, tree, vuln_counter):
     vulnerabilities = []
@@ -54,8 +58,11 @@ def detect_sql_injection(filepath, tree, vuln_counter):
                     return child
         return None
 
+    def string_literals(node):
+        return [text(child) for child in iterate_all(node) if child.type in SQL_LITERAL_NODE_TYPES]
+
     def contains_sql_keyword(node):
-        return any(keyword in text(node).upper() for keyword in SQL_KEYWORDS)
+        return any(SQL_KEYWORD_PATTERN.search(literal) for literal in string_literals(node))
 
     def contains_input_method(node):
         return find_input_call(node) is not None
