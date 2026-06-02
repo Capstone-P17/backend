@@ -88,6 +88,7 @@ class VulnerabilityFinding(BaseModel):
     guide_source: str
     guide_category: str
     guide_item: str
+    cwe: str = ""
     file: str
     line: int | None = None
     function: str | None = None

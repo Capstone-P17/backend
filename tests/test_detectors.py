@@ -33,6 +33,7 @@ def test_sample_analysis_detects_expected_java_findings() -> None:
         assert finding["guide_source"] == "행정안전부 「소프트웨어 보안약점 진단가이드(2019.6. 개정)」"
         assert finding["guide_category"]
         assert finding["guide_item"]
+        assert finding["cwe"].startswith("CWE-")
         assert finding["confidence"] in {"HIGH", "MEDIUM", "LOW"}
         assert finding["confidence_reason"]
         assert finding["evidence"]
