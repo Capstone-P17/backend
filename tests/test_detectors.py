@@ -342,6 +342,55 @@ public class CryptoPolicyService {
     assert not any(finding["function"] == "safePasswordHash" for finding in findings)
 
 
+def test_path_traversal_tracks_cookie_value_through_intermediate_filename(tmp_path: Path) -> None:
+    sample = tmp_path / "PathFlowController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import javax.servlet.http.*;
+
+public class PathFlowController {
+    public void unsafeCookieFile(HttpServletRequest request) throws Exception {
+        Cookie[] theCookies = request.getCookies();
+        String param = "noCookieValueSupplied";
+        if (theCookies != null) {
+            for (Cookie theCookie : theCookies) {
+                if (theCookie.getName().equals("target")) {
+                    param = java.net.URLDecoder.decode(theCookie.getValue(), "UTF-8");
+                    break;
+                }
+            }
+        }
+        String fileName = "/var/app/files/" + param;
+        FileInputStream fis = new FileInputStream(new File(fileName));
+    }
+
+    public void safeConstantFile() throws Exception {
+        String fileName = "/var/app/files/help.txt";
+        FileInputStream fis = new FileInputStream(new File(fileName));
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "PATH_TRAVERSAL"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeCookieFile"]
+    finding = findings[0]
+    assert "param" in finding["call_chain"][-1]
+    assert "fileName" in finding["call_chain"][-1]
+    assert "FileInputStream" in finding["call_chain"][-1]
+    assert "경로 변수" in finding["evidence"]
+    assert "FileInputStream" in finding["confidence_reason"]
+    assert not any(finding["function"] == "safeConstantFile" for finding in findings)
+
+
 def test_command_injection_tracks_tainted_list_into_process_builder_command(tmp_path: Path) -> None:
     sample = tmp_path / "CommandListController.java"
     sample.write_text(

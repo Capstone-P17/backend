@@ -50,14 +50,14 @@
     "notes": "Header input is copied into a command argument List and passed to ProcessBuilder.command(argList)."
   },
   {
-    "id": "owasp_path_bad_00001_known_fn",
+    "id": "owasp_path_bad_00001",
     "source": "OWASP BenchmarkJava",
     "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
     "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00001.java",
     "vulnerability_type": "PATH_TRAVERSAL",
     "ground_truth_vulnerable": true,
-    "expected_detected": false,
-    "notes": "Known false negative: cookie value is copied and combined into fileName before FileInputStream; current detector does not follow that multi-step flow."
+    "expected_detected": true,
+    "notes": "Cookie value is copied into fileName and passed to FileInputStream; detector tracks cookie value assignment and intermediate path variable."
   },
   {
     "id": "owasp_xss_bad_00013_known_fn",
