@@ -60,14 +60,14 @@
     "notes": "Cookie value is copied into fileName and passed to FileInputStream; detector tracks cookie value assignment and intermediate path variable."
   },
   {
-    "id": "owasp_xss_bad_00013_known_fn",
+    "id": "owasp_xss_bad_00013",
     "source": "OWASP BenchmarkJava",
     "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
     "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00013.java",
     "vulnerability_type": "XSS",
     "ground_truth_vulnerable": true,
-    "expected_detected": false,
-    "notes": "Known false negative: the OWASP sample uses a flow shape outside the current simple XSS taint tracker."
+    "expected_detected": true,
+    "notes": "Header enumeration value is copied into param and written with response.getWriter().format() in an HTML response."
   },
   {
     "id": "owasp_weakrand_safe_00010",
@@ -100,14 +100,14 @@
     "notes": "Juliet MD2 hash sample should be reported as WEAK_HASH."
   },
   {
-    "id": "juliet_xss_getparameter_14_known_fn",
+    "id": "juliet_xss_getparameter_14",
     "source": "NIST SARD Juliet Java 1.3",
     "source_url": "https://samate.nist.gov/SARD/test-suites/111",
     "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE83_XSS_Attribute/CWE83_XSS_Attribute__Servlet_getParameter_Servlet_14.java",
     "vulnerability_type": "XSS",
     "ground_truth_vulnerable": true,
-    "expected_detected": false,
-    "notes": "Known false negative: assignment occurs inside a branch and output occurs in a later branch; current tracker does not retain that flow."
+    "expected_detected": true,
+    "notes": "Branch-local getParameter assignment is retained until the later println HTML attribute sink."
   },
   {
     "id": "juliet_hardcoded_password_driver_01_known_fn",

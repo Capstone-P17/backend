@@ -130,6 +130,100 @@ public class XssFlowController {
     assert "HTML 이스케이프" in findings[0]["evidence"]
 
 
+def test_xss_detector_tracks_branch_assignment_until_output(tmp_path: Path) -> None:
+    sample = tmp_path / "XssBranchController.java"
+    sample.write_text(
+        """
+import javax.servlet.http.*;
+import java.io.*;
+
+public class XssBranchController {
+    public void bad(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String data;
+        if (System.currentTimeMillis() > 0) {
+            data = request.getParameter("name");
+        } else {
+            data = null;
+        }
+
+        if (data != null) {
+            response.getWriter().println("<br>bad() - <img src=\\"" + data + "\\">");
+        }
+    }
+
+    public void good(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String data;
+        if (System.currentTimeMillis() > 0) {
+            data = "foo";
+        } else {
+            data = null;
+        }
+
+        if (data != null) {
+            response.getWriter().println("<br>good() - <img src=\\"" + data + "\\">");
+        }
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "XSS"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["bad"]
+    assert "data" in findings[0]["call_chain"][0]
+    assert "HTML 이스케이프" in findings[0]["evidence"]
+
+
+def test_xss_detector_tracks_header_enumeration_into_format_output(tmp_path: Path) -> None:
+    sample = tmp_path / "XssFormatController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.util.*;
+import javax.servlet.http.*;
+
+public class XssFormatController {
+    public void unsafeFormat(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        response.setContentType("text/html;charset=UTF-8");
+        String param = "";
+        Enumeration<String> headers = request.getHeaders("Referer");
+        if (headers != null && headers.hasMoreElements()) {
+            param = headers.nextElement();
+        }
+        param = java.net.URLDecoder.decode(param, "UTF-8");
+        Object[] obj = {"a", "b"};
+        response.getWriter().format(Locale.US, param, obj);
+    }
+
+    public void safePlainTextFormat(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        response.setContentType("text/plain;charset=UTF-8");
+        String param = request.getHeader("Referer");
+        response.getWriter().format(Locale.US, param);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "XSS"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeFormat"]
+    assert "format" in findings[0]["code_snippet"]
+    assert "getHeaders" in findings[0]["call_chain"][0]
+    assert "HTML 응답" in findings[0]["evidence"]
+
+
 def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
     sample = tmp_path / "UploadController.java"
     sample.write_text(

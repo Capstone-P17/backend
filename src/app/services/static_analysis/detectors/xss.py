@@ -3,8 +3,8 @@ from __future__ import annotations
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 
-INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
-OUTPUT_METHODS = ["println", "print", "write", "append"]
+INPUT_METHODS = ["getParameter", "getHeader", "getHeaders", "getCookies", "getQueryString", "getRequestURI"]
+OUTPUT_METHODS = ["println", "print", "write", "append", "format"]
 HTML_FRAGMENTS = ["<", ">", "</", "/>", "<h1", "<div", "<span", "<p", "<script", "<img", "<a "]
 SANITIZER_METHODS = [
     "escapeHtml",
@@ -62,6 +62,7 @@ def detect_xss(filepath, tree, vuln_counter):
         user_input_vars = {}
         tainted_vars = set()
         sanitized_vars = set()
+        html_response_seen = False
 
         def remember_taint(var_name, source_node, source_var=None):
             tainted_vars.add(var_name)
@@ -95,10 +96,13 @@ def detect_xss(filepath, tree, vuln_counter):
                 remember_taint(var_name, statement_node, source_var)
             elif sanitized_source_var:
                 remember_sanitized(var_name)
+            elif value_node.type == "null_literal":
+                return
             else:
                 clear_tracking(var_name)
 
         def visit_method_nodes():
+            nonlocal html_response_seen
             stack = [method_node]
             while stack:
                 node = stack.pop()
@@ -122,9 +126,44 @@ def detect_xss(filepath, tree, vuln_counter):
                     continue
 
                 if node.type == "method_invocation":
+                    if is_html_content_type_call(node):
+                        html_response_seen = True
+                    update_from_enumeration_next(node)
                     inspect_output(node)
 
                 stack.extend(reversed(node.children))
+
+        def is_html_content_type_call(node):
+            name_node = node.child_by_field_name("name")
+            args_node = node.child_by_field_name("arguments")
+            return bool(
+                name_node
+                and args_node
+                and text(name_node) == "setContentType"
+                and "text/html" in args_node.text.decode().lower()
+            )
+
+        def update_from_enumeration_next(node):
+            name_node = node.child_by_field_name("name")
+            object_node = node.child_by_field_name("object")
+            if not name_node or not object_node or text(name_node) != "nextElement":
+                return
+            object_name = text(object_node)
+            if object_name not in tainted_vars:
+                return
+            parent = node.parent
+            while parent and parent.type not in {"assignment_expression", "variable_declarator", "method_declaration"}:
+                parent = parent.parent
+            if not parent or parent.type == "method_declaration":
+                return
+            if parent.type == "assignment_expression":
+                left = parent.child_by_field_name("left")
+                if left and left.type == "identifier":
+                    remember_taint(text(left), parent, object_name)
+            if parent.type == "variable_declarator":
+                name = parent.child_by_field_name("name")
+                if name:
+                    remember_taint(text(name), parent, object_name)
 
         def inspect_output(node):
             name_node = node.child_by_field_name("name")
@@ -147,8 +186,11 @@ def detect_xss(filepath, tree, vuln_counter):
             has_html = any(fragment in args_text for fragment in HTML_FRAGMENTS)
             has_concat = contains_binary_expression(arguments)
             is_sanitized = contains_sanitizer(arguments)
+            is_format_output = text(name_node) == "format"
+            has_unsafe_html_output = has_html and has_concat
+            has_unsafe_format_output = is_format_output and html_response_seen and has_user_input
 
-            if has_user_input and has_html and has_concat and not is_sanitized:
+            if has_user_input and (has_unsafe_html_output or has_unsafe_format_output) and not is_sanitized:
                 used_var = unsafe_vars[0] if unsafe_vars else None
                 vuln_counter[0] += 1
                 vulnerabilities.append(
@@ -188,7 +230,9 @@ def detect_xss(filepath, tree, vuln_counter):
         chain = []
         if used_var and used_var in user_input_vars:
             source_code = user_input_vars[used_var]["code"]
-            if "getHeader" in source_code:
+            if "getHeaders" in source_code:
+                chain.append(f"req.getHeaders → {used_var}")
+            elif "getHeader" in source_code:
                 chain.append(f"req.getHeader → {used_var}")
             elif "getQueryString" in source_code:
                 chain.append(f"req.getQueryString → {used_var}")
@@ -209,11 +253,21 @@ def detect_xss(filepath, tree, vuln_counter):
         sink = build_output_name(node)
         if used_var and used_var in user_input_vars:
             source = user_input_vars[used_var].get("input_call") or user_input_vars[used_var]["code"]
+            if is_format_output(node):
+                return (
+                    f"`{source}`에서 온 `{used_var}` 값이 HTML 응답의 `{sink}` 출력 포맷 문자열/인자로 전달되며, "
+                    "HTML 이스케이프 처리가 확인되지 않았습니다."
+                )
             return (
                 f"`{source}`에서 온 `{used_var}` 값이 HTML 문자열과 결합되어 "
                 f"`{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
             )
         if direct_input_call:
+            if is_format_output(node):
+                return (
+                    f"`{direct_input_call}` 입력이 HTML 응답의 `{sink}` 출력 포맷 문자열/인자로 직접 전달되며, "
+                    "HTML 이스케이프 처리가 확인되지 않았습니다."
+                )
             return (
                 f"`{direct_input_call}` 입력이 HTML 문자열과 직접 결합되어 "
                 f"`{sink}`로 출력되며, HTML 이스케이프 처리가 확인되지 않았습니다."
@@ -229,10 +283,19 @@ def detect_xss(filepath, tree, vuln_counter):
             source_desc = f"`{direct_input_call}` 직접 입력 출처"
         else:
             source_desc = "외부 입력으로 추정되는 값"
+        if is_format_output(node):
+            return (
+                f"{source_desc}, HTML 응답 문맥, `{sink}` 출력 API가 같은 흐름에서 확인되어 HIGH로 판단했습니다. "
+                "탐지 가능한 HTML 이스케이프 또는 sanitizer 호출은 출력 직전까지 확인되지 않았습니다."
+            )
         return (
             f"{source_desc}, HTML 조각과의 문자열 결합, `{sink}` 응답 출력 API가 같은 흐름에서 확인되어 HIGH로 판단했습니다. "
             "탐지 가능한 HTML 이스케이프 또는 sanitizer 호출은 출력 직전까지 확인되지 않았습니다."
         )
+
+    def is_format_output(node):
+        name_node = node.child_by_field_name("name")
+        return bool(name_node and name_node.text.decode() == "format")
 
     def build_output_name(node):
         name_node = node.child_by_field_name("name")
