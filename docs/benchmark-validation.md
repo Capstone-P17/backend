@@ -42,15 +42,15 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 | Command Injection | OWASP BenchmarkJava | TP 확인 | `List`에 명령 인자를 쌓고 `ProcessBuilder.command(argList)`로 넘기는 흐름을 탐지한다. |
 | Path Traversal | OWASP BenchmarkJava | TP 확인 | 쿠키 값이 중간 변수에 저장되고 파일명 변수에 결합된 뒤 `FileInputStream`으로 전달되는 흐름을 탐지한다. |
 | XSS | OWASP BenchmarkJava, Juliet | TP 확인 | 분기 내부 `getParameter` 할당 후 후속 HTML 출력 sink로 전달되는 흐름과, HTML 응답에서 header 값이 `format()` 출력으로 전달되는 흐름을 탐지한다. |
-| Hardcoded Secret | Juliet | known FN | generic 변수명 `data`에 할당된 하드코딩 비밀번호가 이후 비밀번호 인자로 쓰이는 흐름은 아직 탐지하지 못한다. |
+| Hardcoded Secret | Juliet | TP 확인 | generic 변수명 `data`에 문자열 리터럴이 할당된 뒤 `DriverManager.getConnection(..., data)` 비밀번호 인자로 사용되는 흐름을 탐지한다. |
 
 현재 manifest 기준 결과는 다음과 같다.
 
 | 결과 | 케이스 수 | 설명 |
 |---|---:|---|
-| TP | 8 | 공식 ground truth가 취약이고 현재 detector가 탐지한다. |
+| TP | 9 | 공식 ground truth가 취약이고 현재 detector가 탐지한다. |
 | TN | 3 | 공식 ground truth가 비취약이고 현재 detector가 탐지하지 않는다. |
-| known FN | 1 | 공식 ground truth는 취약이지만 현재 detector가 탐지하지 못한다. |
+| known FN | 0 | 현재 manifest 기준으로 의도적으로 남긴 known false negative는 없다. |
 | FP | 0 | 현재 manifest에는 의도된 FP가 없다. |
 
 ## 해석 기준
@@ -64,8 +64,8 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 
 ```text
 공식 OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 샘플 일부를 기준으로 회귀 테스트를 수행했습니다.
-현재 SQL Injection, XSS, Weak Hash, Insecure Random, Command Injection, Path Traversal 일부 패턴은 공식 샘플에서 탐지 가능하며,
-generic 변수명을 거친 Hardcoded Secret 일부 샘플은 known false negative로 관리하고 있습니다.
+현재 SQL Injection, XSS, Weak Hash, Insecure Random, Command Injection, Path Traversal, Hardcoded Secret 일부 패턴은 공식 샘플에서 탐지 가능하며,
+현재 manifest 기준으로 의도적으로 남긴 known false negative는 없습니다.
 ```
 
 ## 최근 개선 내역
@@ -73,9 +73,11 @@ generic 변수명을 거친 Hardcoded Secret 일부 샘플은 known false negati
 - Command Injection: OWASP BenchmarkTest00006의 `request.getHeader(...) -> param -> argList.add(...) -> ProcessBuilder.command(argList)` 흐름을 탐지하도록 개선했다.
 - Path Traversal: OWASP BenchmarkTest00001의 `request.getCookies() -> Cookie.getValue() -> fileName -> FileInputStream` 흐름을 탐지하도록 개선했다.
 - XSS: OWASP BenchmarkTest00013의 `request.getHeaders(...) -> param -> response.getWriter().format(...)` 흐름과 Juliet CWE83 14번의 branch assignment 후 HTML 출력 흐름을 탐지하도록 개선했다.
+- Hardcoded Secret: Juliet CWE259 01번의 `data = "..." -> DriverManager.getConnection(..., data)` assignment 흐름을 탐지하도록 개선했다.
 - SQL Injection: SQL 키워드 판정을 전체 AST 텍스트가 아니라 문자열 리터럴 기준으로 좁혀 주석, 로그 메시지, `selected` 같은 일반 단어로 인한 오탐 가능성을 줄였다.
 - Repository analysis guardrail: ZIP slip, 절대 경로, symlink, 과도한 Java 파일 수/파일 크기 입력을 분석 전에 차단한다.
 
 ## 다음 개선 후보
 
-1. Hardcoded Secret: declaration뿐 아니라 assignment expression의 문자열 리터럴과 sink 사용처를 함께 추적
+1. 공식 manifest 범위를 더 넓혀 detector별 TP/TN 샘플을 추가한다.
+2. 메서드/파일 경계를 넘는 inter-procedural taint 추적 범위를 확장한다.

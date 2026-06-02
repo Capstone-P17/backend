@@ -381,6 +381,67 @@ public class SecretFlowController {
     assert not any("injectedPassword" in finding["code_snippet"] for finding in findings)
 
 
+def test_hardcoded_secret_tracks_generic_assignment_into_sensitive_usage(tmp_path: Path) -> None:
+    sample = tmp_path / "SecretAssignmentController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.sql.*;
+
+public class SecretAssignmentController {
+    public void bad() throws Exception {
+        String data;
+        data = "7e5tc4s3";
+        DriverManager.getConnection("jdbc:h2:mem:test", "root", data);
+    }
+
+    public void safeConsole() throws Exception {
+        String data;
+        data = "";
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        data = reader.readLine();
+        DriverManager.getConnection("jdbc:h2:mem:test", "root", data);
+    }
+
+    public void safeShortPlaceholder() throws Exception {
+        String data;
+        data = "foo";
+        DriverManager.getConnection("jdbc:h2:mem:test", "root", data);
+    }
+
+    public void safeOverwrittenBeforeUse() throws Exception {
+        String data;
+        data = "temporary123";
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        data = reader.readLine();
+        DriverManager.getConnection("jdbc:h2:mem:test", "root", data);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "HARDCODED_SECRET"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["bad"]
+    finding = findings[0]
+    assert 'data = "7e5tc4s3"' in finding["code_snippet"]
+    assert finding["call_chain"] == [
+        "SecretAssignmentController.bad",
+        "getConnection",
+        "할당 line 7",
+        "사용 line 8",
+    ]
+    assert "할당되었습니다" in finding["evidence"]
+    assert "getConnection" in finding["evidence"]
+    assert finding["confidence"] == "HIGH"
+
+
 def test_weak_hash_detects_unsalted_password_hash_but_ignores_checksum(tmp_path: Path) -> None:
     sample = tmp_path / "CryptoPolicyService.java"
     sample.write_text(

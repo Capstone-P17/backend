@@ -134,7 +134,7 @@ def _is_relevant_secret_usage(node):
     return class_name in SECRET_USAGE_CLASS_NAMES
 
 
-def _build_secret_chain(declaration_node, usage_node):
+def _build_secret_chain(declaration_node, usage_node, origin_label="선언"):
     chain = []
     if usage_node is not None:
         class_name = find_parent_class(usage_node)
@@ -152,7 +152,7 @@ def _build_secret_chain(declaration_node, usage_node):
             if class_name:
                 chain.append(class_name)
 
-    chain.append(f"선언 line {declaration_node.start_point[0] + 1}")
+    chain.append(f"{origin_label} line {declaration_node.start_point[0] + 1}")
     if usage_node is not None:
         chain.append(f"사용 line {usage_node.start_point[0] + 1}")
     else:
@@ -160,8 +160,9 @@ def _build_secret_chain(declaration_node, usage_node):
     return chain
 
 
-def _build_secret_evidence(var_name, declaration_node, usage_node, value, confidence):
-    base = f"`{var_name}`가 line {declaration_node.start_point[0] + 1}에서 문자열 리터럴로 하드코딩되어 선언되었습니다."
+def _build_secret_evidence(var_name, declaration_node, usage_node, value, confidence, origin_label="선언"):
+    origin_text = "선언" if origin_label == "선언" else "할당"
+    base = f"`{var_name}`가 line {declaration_node.start_point[0] + 1}에서 문자열 리터럴로 하드코딩되어 {origin_text}되었습니다."
     if usage_node is not None:
         usage_method = _usage_method_name(usage_node)
         usage_name = usage_method or _object_creation_class_name(usage_node) or "민감 API"
@@ -183,6 +184,34 @@ def _build_secret_evidence(var_name, declaration_node, usage_node, value, confid
 def detect_hardcoded_secrets(filepath, tree, vuln_counter):
     vulnerabilities = []
     candidates = {}
+    reported_vars = set()
+    ordered_nodes = sorted(iterate_all(tree.root_node), key=lambda item: (item.start_byte, item.end_byte))
+
+    def candidate_key(var_name, node):
+        return f"{var_name}:{node.start_byte}:{node.end_byte}"
+
+    def add_candidate(var_name, name_node, value_node, statement_node, *, require_usage=False, origin_label="선언"):
+        var_name_lower = var_name.lower()
+        has_keyword = any(keyword in var_name_lower for keyword in SECRET_KEYWORDS)
+        value = _string_literal_value(value_node)
+        has_value_pattern = _matches_secret_value_pattern(value)
+        if _is_config_placeholder(value):
+            return
+        if require_usage and (_looks_like_placeholder(value) or len(value.strip()) < 8 or _string_entropy(value) < 2.5):
+            return
+        if not has_keyword and not has_value_pattern and not require_usage:
+            return
+        key = candidate_key(var_name, statement_node)
+        candidates[key] = {
+            "declaration": statement_node,
+            "name": name_node,
+            "value": value,
+            "has_keyword": has_keyword,
+            "has_value_pattern": has_value_pattern,
+            "var_name": var_name,
+            "require_usage": require_usage,
+            "origin_label": origin_label,
+        }
 
     for node in iterate_all(tree.root_node):
         if node.type in ("field_declaration", "local_variable_declaration"):
@@ -192,41 +221,61 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
                     value_node = child.child_by_field_name("value")
                     if name_node and value_node:
                         var_name = name_node.text.decode()
-                        var_name_lower = var_name.lower()
-                        has_keyword = any(keyword in var_name_lower for keyword in SECRET_KEYWORDS)
                         is_string = value_node.type == "string_literal"
                         if not is_string:
                             continue
-                        value = _string_literal_value(value_node)
-                        has_value_pattern = _matches_secret_value_pattern(value)
-                        if _is_config_placeholder(value):
-                            continue
-                        if has_keyword or has_value_pattern:
-                            candidates[var_name] = {
-                                "declaration": node,
-                                "name": name_node,
-                                "value": value,
-                                "has_keyword": has_keyword,
-                                "has_value_pattern": has_value_pattern,
-                            }
+                        add_candidate(var_name, name_node, value_node, node)
 
-    usages = {}
-    for node in iterate_all(tree.root_node):
-        if node.type != "identifier":
-            continue
-        var_name = _text(node)
-        candidate = candidates.get(var_name)
-        if not candidate or var_name in usages:
-            continue
-        if node.start_byte == candidate["name"].start_byte and node.end_byte == candidate["name"].end_byte:
-            continue
-        if not _is_relevant_secret_usage(node):
-            continue
-        usages[var_name] = node
+        if node.type == "assignment_expression":
+            left_node = node.child_by_field_name("left")
+            right_node = node.child_by_field_name("right")
+            if not left_node or not right_node or left_node.type != "identifier" or right_node.type != "string_literal":
+                continue
+            var_name = _text(left_node)
+            var_name_lower = var_name.lower()
+            has_keyword = any(keyword in var_name_lower for keyword in SECRET_KEYWORDS)
+            has_value_pattern = _matches_secret_value_pattern(_string_literal_value(right_node))
+            add_candidate(
+                var_name,
+                left_node,
+                right_node,
+                node,
+                require_usage=not has_keyword and not has_value_pattern,
+                origin_label="할당",
+            )
 
-    for var_name, candidate in candidates.items():
+    def is_overwrite_after_candidate(node, candidate):
+        if node.type != "assignment_expression":
+            return False
+        if node.start_byte == candidate["declaration"].start_byte and node.end_byte == candidate["declaration"].end_byte:
+            return False
+        left_node = node.child_by_field_name("left")
+        return bool(left_node and left_node.type == "identifier" and _text(left_node) == candidate["var_name"])
+
+    def find_usage_after_candidate(candidate):
+        for node in ordered_nodes:
+            if node.start_byte <= candidate["declaration"].start_byte:
+                continue
+            if is_overwrite_after_candidate(node, candidate):
+                return None
+            if node.type != "identifier" or _text(node) != candidate["var_name"]:
+                continue
+            if node.start_byte == candidate["name"].start_byte and node.end_byte == candidate["name"].end_byte:
+                continue
+            if _is_relevant_secret_usage(node):
+                return node
+        return None
+
+    for candidate in candidates.values():
+        var_name = candidate["var_name"]
         declaration = candidate["declaration"]
-        usage_node = usages.get(var_name)
+        usage_node = find_usage_after_candidate(candidate)
+        if candidate["require_usage"] and usage_node is None:
+            continue
+        report_key = candidate_key(var_name, declaration)
+        if report_key in reported_vars:
+            continue
+        reported_vars.add(report_key)
         has_sensitive_usage = usage_node is not None
         confidence, confidence_reason = _classify_secret_confidence(
             candidate["value"],
@@ -243,8 +292,15 @@ def detect_hardcoded_secrets(filepath, tree, vuln_counter):
                 "line": candidate["name"].start_point[0] + 1,
                 "function": find_parent_method(declaration),
                 "code_snippet": declaration.text.decode().strip(),
-                "call_chain": _build_secret_chain(declaration, usage_node),
-                "evidence": _build_secret_evidence(var_name, declaration, usage_node, candidate["value"], confidence),
+                "call_chain": _build_secret_chain(declaration, usage_node, candidate["origin_label"]),
+                "evidence": _build_secret_evidence(
+                    var_name,
+                    declaration,
+                    usage_node,
+                    candidate["value"],
+                    confidence,
+                    candidate["origin_label"],
+                ),
                 "confidence": confidence,
                 "confidence_reason": confidence_reason,
                 "description": "",

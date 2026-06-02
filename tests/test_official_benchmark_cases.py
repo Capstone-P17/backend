@@ -67,5 +67,4 @@ def test_official_benchmark_manifest_tracks_detection_outcomes() -> None:
 
     assert outcomes["true_positive"]
     assert outcomes["true_negative"]
-    assert outcomes["known_false_negative"]
     assert not outcomes["expected_false_positive"]
