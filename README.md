@@ -12,7 +12,7 @@ DoUSECURE는 Java 소스코드를 대상으로 보안 취약점을 정적 분석
 - `tree-sitter-java` 기반 AST 파싱과 rule-based detector 실행
 - SQL Injection, XSS, Path Traversal, Command Injection, Dangerous File Upload 등 8개 detector 지원
 - 공식 보안약점 진단가이드 항목, confidence, evidence 매핑
-- OpenAI API 설정 시 LLM 기반 상세 리포트 생성
+- OpenAI API 설정 시 정적 분석 근거 기반 LLM 상세 리포트 생성
 - PDF 리포트 다운로드와 분석 결과 조회 API 제공
 
 ## 아키텍처
@@ -44,6 +44,15 @@ src/app/services/static_analysis/
 ```
 
 `src/analyzer/test_samples/`는 회귀 테스트와 시연용 Java 샘플 위치입니다. 이전에 사용하던 레거시 `src/analyzer/analyzer.py` 분석기는 제거되었고, 서비스 실행 경로에는 포함되지 않습니다.
+
+## LLM 역할
+
+DoUSECURE의 취약점 탐지는 LLM이 아니라 `tree-sitter-java` 기반 rule-based detector가 수행합니다.
+LLM은 detector가 만든 코드 위치, 호출 경로, evidence, 공식 가이드 매핑을 근거로 상세 설명과 수정 가이드를 생성하는 리포트 계층입니다.
+
+`OPENAI_API_KEY`가 비어 있거나 LLM 호출이 실패해도 정적 분석 결과는 유지되며, detector metadata 기반 fallback 설명과 수정 예시가 제공됩니다.
+
+- [LLM 역할과 Grounding 정책](docs/llm-role-and-grounding.md)
 
 ## 공식 가이드 기준
 
