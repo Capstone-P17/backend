@@ -41,7 +41,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 | Insecure Random | Juliet | TP 확인 | `java.util.Random` 기반 약한 난수 사용을 탐지한다. |
 | Command Injection | OWASP BenchmarkJava | TP 확인 | `List`에 명령 인자를 쌓고 `ProcessBuilder.command(argList)`로 넘기는 흐름을 탐지한다. |
 | Path Traversal | OWASP BenchmarkJava | TP 확인 | 쿠키 값이 중간 변수에 저장되고 파일명 변수에 결합된 뒤 `FileInputStream`으로 전달되는 흐름과, Controller 입력이 Service/FileService 구현체를 거쳐 파일 접근 API로 전달되는 클래스/파일 경계 흐름을 탐지한다. |
-| XSS | OWASP BenchmarkJava, Juliet | TP 확인 | 분기 내부 `getParameter` 할당 후 후속 HTML 출력 sink로 전달되는 흐름과, HTML 응답에서 header 값이 `format()` 출력으로 전달되는 흐름을 탐지한다. |
+| XSS | OWASP BenchmarkJava, Juliet | TP 확인 | 분기 내부 `getParameter` 할당 후 후속 HTML 출력 sink로 전달되는 흐름, HTML 응답에서 header 값이 `format()` 출력으로 전달되는 흐름, Controller 입력이 Renderer/Service 구현체를 거쳐 HTML 반환값으로 출력되는 클래스/파일 경계 흐름을 탐지한다. |
 | Hardcoded Secret | Juliet | TP 확인 | generic 변수명 `data`에 문자열 리터럴이 할당된 뒤 `DriverManager.getConnection(..., data)` 비밀번호 인자로 사용되는 흐름을 탐지한다. |
 
 현재 manifest는 공식 샘플 31개를 포함한다. 기준 결과는 다음과 같다.
@@ -73,6 +73,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 - Command Injection: OWASP BenchmarkTest00006의 `request.getHeader(...) -> param -> argList.add(...) -> ProcessBuilder.command(argList)` 흐름을 탐지하도록 개선했다.
 - Path Traversal: 프로젝트 단위 method index를 사용해 `Controller -> Service/FileService 구현체 -> FileInputStream`처럼 클래스/파일 경계를 넘는 경로 조작 흐름을 탐지하도록 개선했다.
 - Path Traversal: OWASP BenchmarkTest00001의 `request.getCookies() -> Cookie.getValue() -> fileName -> FileInputStream` 흐름을 탐지하도록 개선했다.
+- XSS: 프로젝트 단위 method index를 사용해 `Controller -> Renderer/Service 구현체 -> HTML 반환값 -> response.write(...)`처럼 클래스/파일 경계를 넘는 출력 흐름을 탐지하도록 개선했다.
 - XSS: OWASP BenchmarkTest00013의 `request.getHeaders(...) -> param -> response.getWriter().format(...)` 흐름과 Juliet CWE83 14번의 branch assignment 후 HTML 출력 흐름을 탐지하도록 개선했다.
 - Hardcoded Secret: Juliet CWE259 01번의 `data = "..." -> DriverManager.getConnection(..., data)` assignment 흐름을 탐지하도록 개선했다.
 - Official manifest: OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 기반 회귀 테스트 manifest를 12개에서 31개로 확장했다.

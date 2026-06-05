@@ -225,6 +225,81 @@ public class XssFormatController {
     assert "HTML 응답" in findings[0]["evidence"]
 
 
+def test_xss_detector_tracks_taint_across_controller_renderer_files(tmp_path: Path) -> None:
+    controller = tmp_path / "XssController.java"
+    renderer = tmp_path / "HtmlRenderer.java"
+    implementation = tmp_path / "DefaultHtmlRenderer.java"
+
+    controller.write_text(
+        """
+import javax.servlet.http.*;
+import java.io.*;
+
+public class XssController {
+    private final HtmlRenderer renderer;
+
+    public XssController(HtmlRenderer renderer) {
+        this.renderer = renderer;
+    }
+
+    public void show(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String keyword = request.getParameter("q");
+        String html = this.renderer.render(keyword);
+        response.getWriter().write(html);
+    }
+
+    public void showSafe(HttpServletRequest request, HttpServletResponse response) throws IOException {
+        String keyword = request.getParameter("q");
+        String html = this.renderer.renderSafe(keyword);
+        response.getWriter().write(html);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    renderer.write_text(
+        """
+public interface HtmlRenderer {
+    String render(String keyword);
+    String renderSafe(String keyword);
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    implementation.write_text(
+        """
+public class DefaultHtmlRenderer implements HtmlRenderer {
+    public String render(String keyword) {
+        String html = "<section class='result'>" + keyword + "</section>";
+        return html;
+    }
+
+    public String renderSafe(String keyword) {
+        String safeKeyword = StringEscapeUtils.escapeHtml4(keyword);
+        return "<section class='result'>" + safeKeyword + "</section>";
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "XSS"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["show"]
+    finding = findings[0]
+    assert "XssController.show" in finding["call_chain"]
+    assert any("DefaultHtmlRenderer.render" in step for step in finding["call_chain"])
+    assert "클래스/파일 경계" in finding["evidence"]
+    assert "request.getParameter" in finding["evidence"]
+    assert "inter-procedural" in finding["confidence_reason"]
+    assert not any(finding["function"] == "showSafe" for finding in findings)
+
+
 def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
     sample = tmp_path / "UploadController.java"
     sample.write_text(
