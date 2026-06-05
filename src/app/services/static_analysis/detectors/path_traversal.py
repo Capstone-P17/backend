@@ -500,8 +500,14 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
         if not caller_info:
             return
         local_types = project_index.variable_types_for(caller_info)
-        caller_tainted_vars = set()
-        caller_taint_sources = {}
+        caller_tainted_vars = set(caller_info.source_parameters)
+        caller_taint_sources = {
+            var_name: {
+                "label": f"Spring MVC source parameter `{var_name}`",
+                "line": caller_method.start_point[0] + 1,
+            }
+            for var_name in caller_tainted_vars
+        }
 
         def expression_source(node):
             input_call = None
@@ -649,6 +655,17 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
     scopes = methods or [tree.root_node]
     for scope in scopes:
         tainted_vars.clear()
+        if project_index and scope.type == "method_declaration":
+            method_info = project_index.resolve_method(method_label(scope), arity=len(parameter_names(scope)))
+            if method_info:
+                for source_param in method_info.source_parameters:
+                    tainted_vars[source_param] = {
+                        "line": scope.start_point[0] + 1,
+                        "code": f"Spring MVC source parameter `{source_param}`",
+                        "source_var": source_param,
+                        "previous_var": None,
+                        "source_kind": "spring_mvc",
+                    }
         collect_taint_state(scope)
         find_path_traversal(scope)
     for method in methods:

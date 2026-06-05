@@ -13,6 +13,7 @@ class MethodInfo:
     class_name: str | None
     method_name: str
     parameters: list[str]
+    source_parameters: set[str]
     key: str
     signature_key: str
     has_body: bool
@@ -144,6 +145,7 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
                 class_name=class_name,
                 method_name=method_name,
                 parameters=parameters,
+                source_parameters=_spring_source_parameter_names(method_node),
                 key=key,
                 signature_key=f"{key}/{len(parameters)}",
                 has_body=method_node.child_by_field_name("body") is not None,
@@ -259,6 +261,30 @@ def _parameter_names(method_node: object) -> list[str]:
         if name_node and _node_text(name_node) not in parameters:
             parameters.append(_node_text(name_node))
     return parameters
+
+
+SPRING_MVC_SOURCE_ANNOTATIONS = {
+    "RequestParam",
+    "PathVariable",
+    "RequestHeader",
+    "CookieValue",
+    "RequestBody",
+    "ModelAttribute",
+}
+
+
+def _spring_source_parameter_names(method_node: object) -> set[str]:
+    source_parameters = set()
+    for node in iterate_all(method_node):
+        if node.type != "formal_parameter":
+            continue
+        name_node = node.child_by_field_name("name")
+        if not name_node:
+            continue
+        parameter_text = _node_text(node)
+        if any(f"@{annotation}" in parameter_text for annotation in SPRING_MVC_SOURCE_ANNOTATIONS):
+            source_parameters.add(_node_text(name_node))
+    return source_parameters
 
 
 def _declaration_type_name(declaration_node: object) -> str | None:

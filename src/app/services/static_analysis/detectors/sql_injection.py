@@ -570,8 +570,14 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
             if caller_info:
                 local_types = project_index.variable_types_for(caller_info)
 
-        caller_tainted_vars = set()
-        caller_taint_sources = {}
+        caller_tainted_vars = set(caller_info.source_parameters if caller_info else set())
+        caller_taint_sources = {
+            var_name: {
+                "label": f"Spring MVC source parameter `{var_name}`",
+                "line": caller_method.start_point[0] + 1,
+            }
+            for var_name in caller_tainted_vars
+        }
 
         def expression_source(node):
             input_call = find_input_call(node)

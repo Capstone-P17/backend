@@ -300,6 +300,40 @@ public class DefaultHtmlRenderer implements HtmlRenderer {
     assert not any(finding["function"] == "showSafe" for finding in findings)
 
 
+def test_xss_detector_treats_spring_mvc_request_param_as_source(tmp_path: Path) -> None:
+    sample = tmp_path / "SpringXssController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import org.springframework.web.bind.annotation.*;
+import javax.servlet.http.*;
+
+public class SpringXssController {
+    public void search(@RequestParam String keyword, HttpServletResponse response) throws IOException {
+        response.getWriter().println("<h2>" + keyword + "</h2>");
+    }
+
+    public void safeSearch(@RequestParam String keyword, HttpServletResponse response) throws IOException {
+        String safeKeyword = StringEscapeUtils.escapeHtml4(keyword);
+        response.getWriter().println("<h2>" + safeKeyword + "</h2>");
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "XSS"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["search"]
+    assert "Spring MVC source parameter" in findings[0]["evidence"]
+    assert "HTML 이스케이프" in findings[0]["evidence"]
+
+
 def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
     sample = tmp_path / "UploadController.java"
     sample.write_text(
@@ -698,6 +732,64 @@ public class LocalFileService implements FileService {
     assert not any(finding["function"] == "safeDownload" for finding in findings)
 
 
+def test_path_traversal_treats_spring_mvc_path_variable_as_source(tmp_path: Path) -> None:
+    controller = tmp_path / "SpringPathController.java"
+    service = tmp_path / "SpringFileService.java"
+
+    controller.write_text(
+        """
+import java.io.*;
+import org.springframework.web.bind.annotation.*;
+
+public class SpringPathController {
+    private final SpringFileService fileService;
+
+    public SpringPathController(SpringFileService fileService) {
+        this.fileService = fileService;
+    }
+
+    public InputStream download(@PathVariable String name) throws Exception {
+        return this.fileService.open(name);
+    }
+
+    public InputStream safeDownload() throws Exception {
+        return this.fileService.openStatic();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    service.write_text(
+        """
+import java.io.*;
+
+public class SpringFileService {
+    public InputStream open(String name) throws Exception {
+        String target = "/var/app/files/" + name;
+        return new FileInputStream(new File(target));
+    }
+
+    public InputStream openStatic() throws Exception {
+        return new FileInputStream(new File("/var/app/files/help.txt"));
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "PATH_TRAVERSAL"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["download"]
+    assert "Spring MVC source parameter" in findings[0]["evidence"]
+    assert "SpringFileService.open" in " ".join(findings[0]["call_chain"])
+    assert not any(finding["function"] == "safeDownload" for finding in findings)
+
+
 def test_command_injection_tracks_tainted_list_into_process_builder_command(tmp_path: Path) -> None:
     sample = tmp_path / "CommandListController.java"
     sample.write_text(
@@ -1064,3 +1156,88 @@ public class UserDao {
     assert "findUser(...)" in controller_findings[0]["evidence"]
     assert not any(finding["function"] == "safeSearch" for finding in findings)
     assert not any(finding["function"] == "overloadedSafeSearch" for finding in findings)
+
+
+def test_sql_injection_treats_spring_mvc_request_param_as_source_across_files(tmp_path: Path) -> None:
+    (tmp_path / "SpringUserController.java").write_text(
+        """
+import java.sql.*;
+import org.springframework.web.bind.annotation.*;
+
+public class SpringUserController {
+    private final SpringUserService userService;
+
+    public SpringUserController(SpringUserService userService) {
+        this.userService = userService;
+    }
+
+    public ResultSet search(@RequestParam String username, Statement stmt) throws Exception {
+        return this.userService.find(username, stmt);
+    }
+
+    public ResultSet safeSearch(@RequestParam String username, Connection conn) throws Exception {
+        return this.userService.findSafely(username, conn);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "SpringUserService.java").write_text(
+        """
+import java.sql.*;
+
+public class SpringUserService {
+    private final SpringUserDao dao;
+
+    public SpringUserService(SpringUserDao dao) {
+        this.dao = dao;
+    }
+
+    public ResultSet find(String username, Statement stmt) throws Exception {
+        return this.dao.findByName(username, stmt);
+    }
+
+    public ResultSet findSafely(String username, Connection conn) throws Exception {
+        return this.dao.findByNameSafely(username, conn);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "SpringUserDao.java").write_text(
+        """
+import java.sql.*;
+
+public class SpringUserDao {
+    public ResultSet findByName(String username, Statement stmt) throws Exception {
+        String query = "SELECT * FROM users WHERE username = '" + username + "'";
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet findByNameSafely(String username, Connection conn) throws Exception {
+        PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE username = ?");
+        ps.setString(1, username);
+        return ps.executeQuery();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+    controller_findings = [
+        finding
+        for finding in findings
+        if finding["function"] == "search" and "클래스/파일 경계를 넘는" in finding["confidence_reason"]
+    ]
+
+    assert controller_findings
+    assert "Spring MVC source parameter" in controller_findings[0]["evidence"]
+    assert "SpringUserController.search" in controller_findings[0]["call_chain"]
+    assert "SpringUserDao.findByName" in controller_findings[0]["call_chain"]
+    assert not any(finding["function"] == "safeSearch" for finding in findings)

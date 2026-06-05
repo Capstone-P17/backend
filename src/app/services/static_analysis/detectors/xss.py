@@ -471,6 +471,14 @@ def detect_xss(filepath, tree, vuln_counter, project_index=None):
             )
             if caller_info:
                 local_types = project_index.variable_types_for(caller_info)
+                for source_param in caller_info.source_parameters:
+                    tainted_vars.add(source_param)
+                    sanitized_vars.discard(source_param)
+                    user_input_vars[source_param] = {
+                        "line": method_node.start_point[0] + 1,
+                        "code": f"Spring MVC source parameter `{source_param}`",
+                        "input_call": f"Spring MVC source parameter `{source_param}`",
+                    }
 
         def visit_method_nodes():
             nonlocal html_response_seen
