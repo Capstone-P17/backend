@@ -832,10 +832,22 @@ public class UserController {
         """
 import java.sql.*;
 
-public class UserService {
+public interface UserService {
+    ResultSet findUser(String id, Statement stmt) throws Exception;
+    ResultSet findUser(String id) throws Exception;
+    ResultSet findUserSafely(String id, Connection conn) throws Exception;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "UserServiceImpl.java").write_text(
+        """
+import java.sql.*;
+
+public class UserServiceImpl implements UserService {
     private final UserDao dao;
 
-    public UserService(UserDao userDao) {
+    public UserServiceImpl(UserDao userDao) {
         this.dao = userDao;
     }
 
@@ -895,7 +907,7 @@ public class UserDao {
 
     assert controller_findings
     assert "UserController.search" in controller_findings[0]["call_chain"]
-    assert "UserService.findUser" in controller_findings[0]["call_chain"]
+    assert "UserServiceImpl.findUser" in controller_findings[0]["call_chain"]
     assert "UserDao.findById" in controller_findings[0]["call_chain"]
     assert "stmt.executeQuery" in controller_findings[0]["call_chain"][-1]
     assert "findUser(...)" in controller_findings[0]["evidence"]

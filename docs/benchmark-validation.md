@@ -76,6 +76,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 - Hardcoded Secret: Juliet CWE259 01번의 `data = "..." -> DriverManager.getConnection(..., data)` assignment 흐름을 탐지하도록 개선했다.
 - Official manifest: OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 기반 회귀 테스트 manifest를 12개에서 31개로 확장했다.
 - SQL Injection: 프로젝트 단위 method index와 필드/지역 변수 타입 추론을 사용해 `Controller -> Service -> DAO`처럼 클래스/파일 경계를 넘는 SQL Injection 흐름을 탐지하도록 개선했다.
+- SQL Injection: interface 타입 필드가 유일한 `implements` 구현체로 연결되는 경우 구현체 메서드 summary를 사용해 파일 간 taint 흐름을 이어가도록 개선했다.
 - SQL Injection: Spring 생성자 주입 형태의 `this.field = parameter` 대입과 `this.userService.findUser(...)` 필드 호출을 타입 해석에 반영하도록 개선했다.
 - SQL Injection: 같은 이름의 메서드가 여러 개 있을 때 인자 개수로 overload를 구분해 잘못된 method summary가 섞이지 않도록 개선했다.
 - SQL Injection: 같은 파일 안에서 caller의 오염된 인자가 callee 파라미터로 전달되고, callee 내부 SQL 생성/실행 sink까지 이어지는 1단계 inter-procedural 흐름을 탐지하도록 개선했다.
@@ -85,4 +86,4 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 ## 다음 개선 후보
 
 1. Hardcoded Secret 정상 샘플과 File Upload 공식/준공식 샘플을 추가로 보강한다.
-2. interface 구현체, 오버로딩, 상속/다형성까지 inter-procedural taint 해석 범위를 확장한다.
+2. 여러 구현체가 존재하는 interface, 상속/다형성까지 inter-procedural taint 해석 범위를 확장한다.

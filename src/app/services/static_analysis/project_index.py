@@ -15,6 +15,7 @@ class MethodInfo:
     parameters: list[str]
     key: str
     signature_key: str
+    has_body: bool
 
 
 @dataclass
@@ -25,6 +26,7 @@ class ProjectIndex:
     methods_by_name: dict[str, list[MethodInfo]] = field(default_factory=dict)
     methods_by_node_id: dict[int, MethodInfo] = field(default_factory=dict)
     class_field_types: dict[str, dict[str, str]] = field(default_factory=dict)
+    interface_implementations: dict[str, list[str]] = field(default_factory=dict)
     sql_summaries_by_key: dict[str, list[dict]] | None = None
 
     def variable_types_for(self, method: MethodInfo) -> dict[str, str]:
@@ -78,7 +80,32 @@ class ProjectIndex:
         return self._resolve_candidate(qualified_name, arity=arity)
 
     def _resolve_candidate(self, qualified_name: str, *, arity: int) -> MethodInfo | None:
-        return _unique_by_arity(self.methods_by_qualified_name.get(qualified_name, []), arity=arity)
+        method = _unique_by_arity(self.methods_by_qualified_name.get(qualified_name, []), arity=arity)
+        if method and method.has_body:
+            return method
+
+        class_name, _, method_name = qualified_name.rpartition(".")
+        if class_name:
+            implementation_method = self._resolve_implementation_candidate(
+                class_name,
+                method_name=method_name,
+                arity=arity,
+            )
+            if implementation_method:
+                return implementation_method
+        return method
+
+    def _resolve_implementation_candidate(self, interface_name: str, *, method_name: str, arity: int) -> MethodInfo | None:
+        implementations = self.interface_implementations.get(interface_name, [])
+        candidates = []
+        for implementation in implementations:
+            method = _unique_by_arity(
+                self.methods_by_qualified_name.get(f"{implementation}.{method_name}", []),
+                arity=arity,
+            )
+            if method and method.has_body:
+                candidates.append(method)
+        return candidates[0] if len(candidates) == 1 else None
 
 
 def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectIndex:
@@ -92,6 +119,8 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
             if not class_name_node:
                 continue
             class_name = _node_text(class_name_node)
+            for interface_name in _implemented_interfaces_for_class(class_node):
+                index.interface_implementations.setdefault(interface_name, []).append(class_name)
             field_types = _field_types_for_class(class_node)
             field_types.update(_constructor_injected_field_types(class_node, field_types))
             index.class_field_types.setdefault(class_name, {}).update(field_types)
@@ -102,7 +131,7 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
             method_name_node = method_node.child_by_field_name("name")
             if not method_name_node:
                 continue
-            class_name = find_parent_class(method_node)
+            class_name = _find_parent_type_name(method_node)
             method_name = _node_text(method_name_node)
             parameters = _parameter_names(method_node)
             key = f"{class_name}.{method_name}" if class_name else method_name
@@ -115,6 +144,7 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
                 parameters=parameters,
                 key=key,
                 signature_key=f"{key}/{len(parameters)}",
+                has_body=method_node.child_by_field_name("body") is not None,
             )
             index.methods.append(method)
             index.methods_by_key[method.signature_key] = method
@@ -123,6 +153,30 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
             index.methods_by_node_id[id(method_node)] = method
 
     return index
+
+
+def _find_parent_type_name(node: object) -> str | None:
+    current = node.parent
+    while current:
+        if current.type in {"class_declaration", "interface_declaration"}:
+            name_node = current.child_by_field_name("name")
+            if name_node:
+                return _node_text(name_node)
+        current = current.parent
+    return find_parent_class(node)
+
+
+def _implemented_interfaces_for_class(class_node: object) -> list[str]:
+    interfaces = []
+    for child in class_node.children:
+        if child.type != "super_interfaces":
+            continue
+        for node in iterate_all(child):
+            if node.type.endswith("type_identifier"):
+                name = _node_text(node)
+                if name not in interfaces:
+                    interfaces.append(name)
+    return interfaces
 
 
 def _field_types_for_class(class_node: object) -> dict[str, str]:
