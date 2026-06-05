@@ -743,3 +743,137 @@ public class SqlFlowController {
     unsafe_concat = findings[0]["code_snippet"]
     assert "String query" in unsafe_concat
     assert ">" in unsafe_concat and "executeQuery" in unsafe_concat
+
+
+def test_sql_injection_tracks_taint_across_same_file_method_call(tmp_path: Path) -> None:
+    sample = tmp_path / "SqlInterproceduralController.java"
+    sample.write_text(
+        """
+import java.sql.*;
+import javax.servlet.http.*;
+
+public class SqlInterproceduralController {
+    public ResultSet route(HttpServletRequest req, Statement stmt) throws Exception {
+        String userId = req.getParameter("id");
+        return findById(userId, stmt);
+    }
+
+    private ResultSet findById(String id, Statement stmt) throws Exception {
+        String query = "SELECT * FROM users WHERE id = '" + id + "'";
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet safeRoute(HttpServletRequest req, Statement stmt) throws Exception {
+        return findStatic(stmt);
+    }
+
+    private ResultSet findStatic(Statement stmt) throws Exception {
+        String query = "SELECT * FROM users";
+        return stmt.executeQuery(query);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    interprocedural = [
+        finding
+        for finding in findings
+        if finding["function"] == "route" and "inter-procedural" in finding["confidence_reason"]
+    ]
+
+    assert [finding["function"] for finding in findings] == ["findById", "route"]
+    assert interprocedural
+    assert "findById(...)" in interprocedural[0]["evidence"]
+    assert "userId` → `id" in interprocedural[0]["evidence"]
+    assert "SqlInterproceduralController.findById" in interprocedural[0]["call_chain"]
+    assert not any(finding["function"] == "safeRoute" for finding in findings)
+
+
+def test_sql_injection_tracks_taint_across_controller_service_dao_files(tmp_path: Path) -> None:
+    (tmp_path / "UserController.java").write_text(
+        """
+import java.sql.*;
+import javax.servlet.http.*;
+
+public class UserController {
+    private UserService userService;
+
+    public ResultSet search(HttpServletRequest req, Statement stmt) throws Exception {
+        String id = req.getParameter("id");
+        return userService.findUser(id, stmt);
+    }
+
+    public ResultSet safeSearch(HttpServletRequest req, Connection conn) throws Exception {
+        String id = req.getParameter("id");
+        return userService.findUserSafely(id, conn);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "UserService.java").write_text(
+        """
+import java.sql.*;
+
+public class UserService {
+    private UserDao dao;
+
+    public ResultSet findUser(String id, Statement stmt) throws Exception {
+        return dao.findById(id, stmt);
+    }
+
+    public ResultSet findUserSafely(String id, Connection conn) throws Exception {
+        return dao.findByIdSafely(id, conn);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "UserDao.java").write_text(
+        """
+import java.sql.*;
+
+public class UserDao {
+    public ResultSet findById(String id, Statement stmt) throws Exception {
+        String query = "SELECT * FROM users WHERE id = '" + id + "'";
+        return stmt.executeQuery(query);
+    }
+
+    public ResultSet findByIdSafely(String id, Connection conn) throws Exception {
+        PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+        ps.setString(1, id);
+        return ps.executeQuery();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    controller_findings = [
+        finding
+        for finding in findings
+        if finding["function"] == "search" and "클래스/파일 경계를 넘는" in finding["confidence_reason"]
+    ]
+
+    assert controller_findings
+    assert "UserController.search" in controller_findings[0]["call_chain"]
+    assert "UserService.findUser" in controller_findings[0]["call_chain"]
+    assert "UserDao.findById" in controller_findings[0]["call_chain"]
+    assert "stmt.executeQuery" in controller_findings[0]["call_chain"][-1]
+    assert "findUser(...)" in controller_findings[0]["evidence"]
+    assert not any(finding["function"] == "safeSearch" for finding in findings)

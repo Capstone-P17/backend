@@ -16,6 +16,7 @@ from src.app.services.static_analysis.detectors.sql_injection import detect_sql_
 from src.app.services.static_analysis.detectors.weak_hash import detect_weak_hash
 from src.app.services.static_analysis.detectors.xss import detect_xss
 from src.app.services.static_analysis.parser import parse_file
+from src.app.services.static_analysis.project_index import build_project_index
 from src.app.services.static_analysis.scoring import build_summary
 
 _CONTEXT_RADIUS = 3
@@ -65,6 +66,7 @@ def analyze_directory(directory, repository=""):
     all_vulnerabilities = []
     all_call_graph = {}
     analyzed_files = []
+    parsed_files = []
     vuln_counter = [0]
 
     for root, _, files in os.walk(directory):
@@ -74,25 +76,29 @@ def analyze_directory(directory, repository=""):
 
             filepath = os.path.join(root, filename)
             analyzed_files.append(filepath)
-            logger.bind(component="static.runner", file=filepath).debug("java_file_analysis_started file={}", filepath)
-            tree, code = parse_file(filepath)
-            file_vulnerabilities = []
-            file_vulnerabilities += detect_hardcoded_secrets(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_sql_injection(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_xss(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_path_traversal(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_command_injection(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_insecure_random(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)
-            file_vulnerabilities += detect_dangerous_file_upload(filepath, tree, vuln_counter)
-            _attach_code_context(file_vulnerabilities, code)
-            all_vulnerabilities += file_vulnerabilities
-            all_call_graph.update(build_call_graph(tree))
-            logger.bind(component="static.runner", file=filepath).debug(
-                "java_file_analysis_finished file={} findings={}",
-                filepath,
-                len(file_vulnerabilities),
-            )
+            parsed_files.append((filepath, *parse_file(filepath)))
+
+    project_index = build_project_index(parsed_files)
+
+    for filepath, tree, code in parsed_files:
+        logger.bind(component="static.runner", file=filepath).debug("java_file_analysis_started file={}", filepath)
+        file_vulnerabilities = []
+        file_vulnerabilities += detect_hardcoded_secrets(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_sql_injection(filepath, tree, vuln_counter, project_index=project_index)
+        file_vulnerabilities += detect_xss(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_path_traversal(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_command_injection(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_insecure_random(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_dangerous_file_upload(filepath, tree, vuln_counter)
+        _attach_code_context(file_vulnerabilities, code)
+        all_vulnerabilities += file_vulnerabilities
+        all_call_graph.update(build_call_graph(tree))
+        logger.bind(component="static.runner", file=filepath).debug(
+            "java_file_analysis_finished file={} findings={}",
+            filepath,
+            len(file_vulnerabilities),
+        )
 
     logger.bind(component="static.runner", repository=repository or "-", directory=directory).info(
         "directory_analysis_finished directory={} files={} findings={}",
