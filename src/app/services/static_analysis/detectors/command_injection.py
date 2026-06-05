@@ -2,29 +2,246 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
+from src.app.services.static_analysis.rules import HTTP_REQUEST_SOURCE_METHODS
+from src.app.services.static_analysis.taint_summary import (
+    argument_expressions as _argument_expressions,
+    identifiers as _identifiers,
+    initialize_summary_cache,
+    node_text as _node_text,
+    referenced_vars as _referenced_vars,
+    source_member_label,
+    unique_summaries,
+)
 
-INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
+INPUT_METHODS = HTTP_REQUEST_SOURCE_METHODS
 
 
-def detect_command_injection(filepath, tree, vuln_counter):
+def _method_invocation_name(node):
+    if node.type != "method_invocation":
+        return None
+    name_node = node.child_by_field_name("name")
+    return _node_text(name_node) if name_node else None
+
+
+def _contains_input_method(node):
+    for child in iterate_all(node):
+        if child.type != "method_invocation":
+            continue
+        if _method_invocation_name(child) in INPUT_METHODS:
+            return True
+    return False
+
+
+def _sink_desc(node, process_builder_vars=None):
+    text = _node_text(node)
+    if node.type == "method_invocation":
+        name_node = node.child_by_field_name("name")
+        object_node = node.child_by_field_name("object")
+        if name_node and _node_text(name_node) == "exec" and "Runtime" in text:
+            return "Runtime.exec(...)"
+        if (
+            name_node
+            and object_node
+            and _node_text(name_node) == "command"
+            and (process_builder_vars is None or _node_text(object_node) in process_builder_vars)
+        ):
+            return "ProcessBuilder.command(...)"
+    if node.type == "object_creation_expression" and "ProcessBuilder" in text:
+        return "new ProcessBuilder(...)"
+    return None
+
+
+def _get_project_command_summaries(project_index):
+    return initialize_summary_cache(
+        project_index,
+        cache_attr="command_summaries_by_key",
+        collect_fn=lambda method, summaries_by_key: _collect_command_summaries_for_method(
+            method, project_index, summaries_by_key
+        ),
+        key_fn=_summary_key,
+    )
+
+
+def _collect_command_summaries_for_method(method, project_index, summaries_by_key):
+    tainted_vars = set(method.parameters)
+    param_sources = {param: {param} for param in method.parameters}
+    tainted_collections = {}
+    process_builder_vars = set()
+    summaries = []
+    local_types = project_index.variable_types_for(method)
+
+    def expression_source_params(node):
+        refs = _referenced_vars(node, tainted_vars)
+        sources = set()
+        for ref in refs:
+            sources.update(param_sources.get(ref, set()))
+        return sources
+
+    def update_variable(var_name, value_node):
+        source_params = expression_source_params(value_node)
+        if source_params:
+            tainted_vars.add(var_name)
+            param_sources[var_name] = set(source_params)
+            return
+        tainted_vars.discard(var_name)
+        param_sources.pop(var_name, None)
+
+    def mark_process_builder_var(name_node, declaration_node):
+        if name_node and "ProcessBuilder" in _node_text(declaration_node):
+            process_builder_vars.add(_node_text(name_node))
+
+    def add_summary(*, source_params, sink_node, command_var=None, collection_var=None, callee_summary=None):
+        if not source_params:
+            return
+        sink = callee_summary["sink"] if callee_summary else _sink_desc(sink_node, process_builder_vars)
+        if not sink:
+            return
+        sink_line = callee_summary["sink_line"] if callee_summary else sink_node.start_point[0] + 1
+        command_line = callee_summary["command_line"] if callee_summary else sink_line
+        summary = {
+            "method_node": method.node,
+            "method_key": method.signature_key,
+            "method_name": method.method_name,
+            "method_label": method.key,
+            "filepath": method.filepath,
+            "parameters": method.parameters,
+            "source_params": sorted(source_params),
+            "sink": sink,
+            "sink_line": sink_line,
+            "command_line": command_line,
+            "command_var": command_var if command_var is not None else (callee_summary or {}).get("command_var"),
+            "collection_var": collection_var if collection_var is not None else (callee_summary or {}).get("collection_var"),
+            "chain": [method.key],
+        }
+        if callee_summary:
+            summary["chain"].extend(callee_summary.get("chain") or [callee_summary["method_label"]])
+        else:
+            if collection_var:
+                summary["chain"].append(f"명령 인자 컬렉션 `{collection_var}`")
+            elif command_var:
+                summary["chain"].append(f"명령 변수 `{command_var}`")
+            summary["chain"].append(sink)
+        summaries.append(summary)
+
+    def mark_tainted_collection(node):
+        if node.type != "method_invocation":
+            return
+        name_node = node.child_by_field_name("name")
+        object_node = node.child_by_field_name("object")
+        args_node = node.child_by_field_name("arguments")
+        if not name_node or not object_node or not args_node:
+            return
+        if _node_text(name_node) not in {"add", "addAll"}:
+            return
+        source_params = expression_source_params(args_node)
+        if source_params:
+            tainted_collections[_node_text(object_node)] = {
+                "source_params": set(source_params),
+                "line": node.start_point[0] + 1,
+            }
+
+    def inspect_command_sink(node):
+        sink = _sink_desc(node, process_builder_vars)
+        if not sink:
+            return
+        args_node = node.child_by_field_name("arguments")
+        if not args_node:
+            return
+
+        for collection_var in _identifiers(args_node):
+            collection = tainted_collections.get(collection_var)
+            if collection:
+                add_summary(
+                    source_params=collection["source_params"],
+                    sink_node=node,
+                    collection_var=collection_var,
+                )
+                return
+
+        refs = _referenced_vars(args_node, tainted_vars)
+        if not refs:
+            return
+        source_params = set()
+        for ref in refs:
+            source_params.update(param_sources.get(ref, set()))
+        add_summary(source_params=source_params, sink_node=node, command_var=refs[0])
+
+    def inspect_summary_call(node):
+        callee = project_index.resolve_invocation(method, node, local_types)
+        if not callee or callee.signature_key == method.signature_key:
+            return
+        args = _argument_expressions(node.child_by_field_name("arguments"))
+        for callee_summary in summaries_by_key.get(callee.signature_key, []):
+            source_params = set()
+            for callee_param in callee_summary["source_params"]:
+                try:
+                    index = callee_summary["parameters"].index(callee_param)
+                except ValueError:
+                    continue
+                if index >= len(args):
+                    continue
+                source_params.update(expression_source_params(args[index]))
+            add_summary(source_params=source_params, sink_node=node, callee_summary=callee_summary)
+
+    stack = [method.node]
+    while stack:
+        node = stack.pop()
+        if node.type == "method_declaration" and node is not method.node:
+            continue
+
+        if node.type in ("local_variable_declaration", "field_declaration"):
+            for child in node.children:
+                if child.type != "variable_declarator":
+                    continue
+                name_node = child.child_by_field_name("name")
+                value_node = child.child_by_field_name("value")
+                if name_node and value_node:
+                    update_variable(_node_text(name_node), value_node)
+                mark_process_builder_var(name_node, node)
+
+        if node.type == "assignment_expression":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if left and right and left.type == "identifier":
+                update_variable(_node_text(left), right)
+
+        if node.type == "method_invocation":
+            mark_tainted_collection(node)
+            inspect_command_sink(node)
+            inspect_summary_call(node)
+
+        if node.type == "object_creation_expression":
+            inspect_command_sink(node)
+
+        stack.extend(reversed(node.children))
+
+    return unique_summaries(summaries, _summary_key)
+
+
+def _summary_key(summary):
+    return (
+        summary["method_key"],
+        tuple(summary["source_params"]),
+        tuple(summary.get("chain") or []),
+        summary["sink"],
+        summary["command_line"],
+    )
+
+
+def detect_command_injection(filepath, tree, vuln_counter, project_index=None):
     vulnerabilities = []
     tainted_vars = {}
     tainted_collections = {}
     process_builder_vars = set()
     reported_sinks = set()
+    interprocedural_reported = set()
+    project_summaries_by_key = _get_project_command_summaries(project_index) if project_index else None
 
     def identifiers_in(node):
-        if node is None:
-            return set()
-        return {child.text.decode() for child in iterate_all(node) if child.type == "identifier"}
+        return _identifiers(node)
 
     def contains_input_method(node):
-        for child in iterate_all(node):
-            if child.type == "method_invocation":
-                name_node = child.child_by_field_name("name")
-                if name_node and name_node.text.decode() in INPUT_METHODS:
-                    return True
-        return False
+        return _contains_input_method(node)
 
     def tainted_identifier_in(node):
         for name in identifiers_in(node):
@@ -39,9 +256,17 @@ def detect_command_injection(filepath, tree, vuln_counter):
         if not contains_input_method(source_node) and not tainted_source:
             return
         name = name_node.text.decode()
+        source_label = source_member_label(
+            source_node,
+            {tainted_source} if tainted_source else set(),
+            source_labels={
+                var_name: source.get("code", f"`{var_name}`")
+                for var_name, source in tainted_vars.items()
+            },
+        )
         tainted_vars[name] = {
             "line": name_node.start_point[0] + 1,
-            "code": declaration_node.text.decode().strip(),
+            "code": source_label or declaration_node.text.decode().strip(),
             "source_var": tainted_source or name,
         }
 
@@ -213,6 +438,222 @@ def detect_command_injection(filepath, tree, vuln_counter):
                 ):
                     report_if_tainted_collection(node, args_node, "ProcessBuilder.command(...)")
 
-    collect_taint_state(tree.root_node)
-    find_command_injection(tree.root_node)
+    def method_declaration_name(method_node):
+        name_node = method_node.child_by_field_name("name")
+        return _node_text(name_node) if name_node else None
+
+    def parameter_names(method_node):
+        params = []
+        for node in iterate_all(method_node):
+            if node.type != "formal_parameter":
+                continue
+            name_node = node.child_by_field_name("name")
+            if name_node and _node_text(name_node) not in params:
+                params.append(_node_text(name_node))
+        return params
+
+    def method_label(method_node):
+        class_name = find_parent_class(method_node)
+        name = method_declaration_name(method_node)
+        return f"{class_name}.{name}" if class_name and name else name
+
+    def detect_interprocedural_calls(caller_method):
+        if not project_index or project_summaries_by_key is None:
+            return
+
+        caller_name = method_declaration_name(caller_method)
+        if not caller_name:
+            return
+
+        caller_info = project_index.resolve_method(
+            method_label(caller_method),
+            arity=len(parameter_names(caller_method)),
+        )
+        if not caller_info:
+            return
+        local_types = project_index.variable_types_for(caller_info)
+        caller_tainted_vars = set(caller_info.source_parameters)
+        caller_taint_sources = {
+            var_name: {
+                "label": f"Spring MVC source parameter `{var_name}`",
+                "line": caller_method.start_point[0] + 1,
+            }
+            for var_name in caller_tainted_vars
+        }
+
+        def expression_source(node):
+            input_call = None
+            for child in iterate_all(node):
+                if child.type != "method_invocation":
+                    continue
+                if _method_invocation_name(child) in INPUT_METHODS:
+                    input_call = child
+                    break
+            if input_call:
+                return {
+                    "label": f"`{_node_text(input_call)}`",
+                    "line": input_call.start_point[0] + 1,
+                }
+            refs = _referenced_vars(node, caller_tainted_vars)
+            if refs:
+                first_var = refs[0]
+                member_label = source_member_label(
+                    node,
+                    refs,
+                    source_labels={name: info.get("label", f"`{name}`") for name, info in caller_taint_sources.items()},
+                )
+                if member_label:
+                    return {
+                        "label": member_label,
+                        "line": node.start_point[0] + 1,
+                    }
+                return caller_taint_sources.get(
+                    first_var,
+                    {"label": f"`{first_var}`", "line": node.start_point[0] + 1},
+                )
+            return None
+
+        def update_caller_taint(var_name, value_node):
+            source = expression_source(value_node)
+            if source:
+                caller_tainted_vars.add(var_name)
+                caller_taint_sources[var_name] = source
+                return
+            caller_tainted_vars.discard(var_name)
+            caller_taint_sources.pop(var_name, None)
+
+        def argument_source(argument_node):
+            source = expression_source(argument_node)
+            if source:
+                return source
+            refs = _referenced_vars(argument_node, caller_tainted_vars)
+            if refs:
+                return caller_taint_sources.get(
+                    refs[0],
+                    {"label": f"`{refs[0]}`", "line": argument_node.start_point[0] + 1},
+                )
+            return None
+
+        def maybe_report_interprocedural_call(node):
+            callee = project_index.resolve_invocation(caller_info, node, local_types)
+            if not callee or callee.signature_key == caller_info.signature_key:
+                return
+            summaries = project_summaries_by_key.get(callee.signature_key, [])
+            if not summaries:
+                return
+
+            args = _argument_expressions(node.child_by_field_name("arguments"))
+            for summary in summaries:
+                matched = []
+                for param_name in summary["source_params"]:
+                    try:
+                        param_index = summary["parameters"].index(param_name)
+                    except ValueError:
+                        continue
+                    if param_index >= len(args):
+                        continue
+                    source = argument_source(args[param_index])
+                    if source:
+                        matched.append((param_name, args[param_index], source))
+
+                if not matched:
+                    continue
+
+                report_key = (
+                    caller_info.signature_key,
+                    node.start_point[0],
+                    callee.signature_key,
+                    tuple(param for param, _, _ in matched),
+                )
+                if report_key in interprocedural_reported:
+                    continue
+                interprocedural_reported.add(report_key)
+
+                source_label = ", ".join(source["label"] for _, _, source in matched)
+                source_lines = sorted({source["line"] for _, _, source in matched if source.get("line")})
+                source_line_desc = f"line {source_lines[0]}에서 " if source_lines else ""
+                param_desc = ", ".join(f"`{_node_text(arg)}` → `{param}`" for param, arg, _ in matched)
+                callee_label = summary["method_label"] or callee.key
+                sink = summary["sink"]
+                command_step = (
+                    f"명령 인자 컬렉션 `{summary['collection_var']}`"
+                    if summary.get("collection_var")
+                    else f"명령 변수 `{summary['command_var']}`"
+                    if summary.get("command_var")
+                    else "명령 값"
+                )
+                summary_chain = summary.get("chain") or [callee_label, command_step, sink]
+                boundary_desc = "클래스/파일 경계를 넘는" if summary.get("filepath") != filepath else "같은 파일 내"
+                call_chain = [method_label(caller_method), f"{source_label} → {param_desc}", *summary_chain]
+
+                vuln_counter[0] += 1
+                vulnerabilities.append(
+                    {
+                        "id": f"VULN-{vuln_counter[0]:03d}",
+                        "type": "COMMAND_INJECTION",
+                        "file": filepath,
+                        "line": node.start_point[0] + 1,
+                        "function": find_parent_method(node),
+                        "code_snippet": node.text.decode().strip(),
+                        "call_chain": call_chain,
+                        "description": "",
+                        "evidence": (
+                            f"{source_line_desc}{source_label}에서 온 입력이 line {node.start_point[0] + 1}의 "
+                            f"`{callee.method_name}(...)` 호출을 통해 {param_desc} 형태로 전달되었습니다. "
+                            f"이후 `{callee_label}` 내부 line {summary['command_line']}에서 {command_step}로 사용되고 "
+                            f"line {summary['sink_line']}의 `{sink}` 운영체제 명령 실행 API까지 도달합니다. "
+                            f"{boundary_desc} 메서드 흐름에서 명령 allowlist, 고정 명령어 사용, 인자 분리 또는 쉘 메타문자 검증은 확인되지 않았습니다."
+                        ),
+                        "confidence_reason": (
+                            f"caller `{caller_name}`의 오염된 인자가 callee `{callee.method_name}`의 명령 파라미터로 전달되고, "
+                            f"callee 내부에서 `{sink}` 실행 API까지 이어지는 {boundary_desc} inter-procedural 흐름을 확인했기 때문에 HIGH로 판단했습니다."
+                        ),
+                    }
+                )
+
+        stack = [caller_method]
+        while stack:
+            node = stack.pop()
+            if node.type == "method_declaration" and node is not caller_method:
+                continue
+
+            if node.type in ("local_variable_declaration", "field_declaration"):
+                for child in node.children:
+                    if child.type != "variable_declarator":
+                        continue
+                    name_node = child.child_by_field_name("name")
+                    value_node = child.child_by_field_name("value")
+                    if name_node and value_node:
+                        update_caller_taint(_node_text(name_node), value_node)
+
+            if node.type == "assignment_expression":
+                left = node.child_by_field_name("left")
+                right = node.child_by_field_name("right")
+                if left and right and left.type == "identifier":
+                    update_caller_taint(_node_text(left), right)
+
+            if node.type == "method_invocation":
+                maybe_report_interprocedural_call(node)
+
+            stack.extend(reversed(node.children))
+
+    methods = [node for node in iterate_all(tree.root_node) if node.type == "method_declaration"]
+    scopes = methods or [tree.root_node]
+    for scope in scopes:
+        tainted_vars.clear()
+        tainted_collections.clear()
+        process_builder_vars.clear()
+        if project_index and scope.type == "method_declaration":
+            method_info = project_index.resolve_method(method_label(scope), arity=len(parameter_names(scope)))
+            if method_info:
+                for source_param in method_info.source_parameters:
+                    tainted_vars[source_param] = {
+                        "line": scope.start_point[0] + 1,
+                        "code": f"Spring MVC source parameter `{source_param}`",
+                        "source_var": source_param,
+                    }
+        collect_taint_state(scope)
+        find_command_injection(scope)
+    for method in methods:
+        detect_interprocedural_calls(method)
     return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]

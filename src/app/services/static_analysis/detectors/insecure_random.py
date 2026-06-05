@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
+from src.app.services.static_analysis.rules import (
+    NON_SECURITY_RANDOM_CONTEXT_KEYWORDS,
+    SECURITY_RANDOM_CONTEXT_KEYWORDS,
+)
 
-# 보안 컨텍스트로 판단할 변수명 키워드
-SECURITY_KEYWORDS = ["token", "session", "key", "nonce", "salt", "password", "passwd", "secret", "auth", "otp", "pin", "csrf"]
-NON_SECURITY_CONTEXT_KEYWORDS = ["dice", "roll", "page", "game", "shuffle", "simulation", "sample", "pager"]
+SECURITY_KEYWORDS = SECURITY_RANDOM_CONTEXT_KEYWORDS
+NON_SECURITY_CONTEXT_KEYWORDS = NON_SECURITY_RANDOM_CONTEXT_KEYWORDS
 
 
 def detect_insecure_random(filepath, tree, vuln_counter):

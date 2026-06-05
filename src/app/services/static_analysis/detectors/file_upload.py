@@ -4,20 +4,21 @@ import re
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
-
-UPLOAD_TYPES = ("MultipartFile", "Part", "FileItem")
-FILENAME_METHODS = ("getOriginalFilename", "getSubmittedFileName")
-WEB_ROOT_TOKENS = (
-    "src/main/resources/static",
-    "resources/static",
-    "webapp",
-    "public",
-    "wwwroot",
-    "htdocs",
+from src.app.services.static_analysis.rules import (
+    UPLOAD_FILENAME_METHODS,
+    UPLOAD_TYPES,
+    UPLOAD_WEB_ROOT_TOKENS,
+)
+from src.app.services.static_analysis.taint_summary import (
+    argument_expressions as _argument_expressions,
+    initialize_summary_cache,
 )
 
+FILENAME_METHODS = UPLOAD_FILENAME_METHODS
+WEB_ROOT_TOKENS = UPLOAD_WEB_ROOT_TOKENS
 
-def detect_dangerous_file_upload(filepath, tree, vuln_counter):
+
+def detect_dangerous_file_upload(filepath, tree, vuln_counter, project_index=None):
     """Detect uploads stored without sufficient server-side validation.
 
     This detector therefore looks for upload objects flowing into common Java
@@ -35,6 +36,25 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         for child in iterate_all(node):
             if child.type == "method_declaration":
                 yield child
+
+    def method_declaration_name(method_node):
+        name_node = method_node.child_by_field_name("name")
+        return text(name_node) if name_node else None
+
+    def parameter_names(method_node):
+        params = []
+        for node in iterate_all(method_node):
+            if node.type != "formal_parameter":
+                continue
+            name_node = node.child_by_field_name("name")
+            if name_node and text(name_node) not in params:
+                params.append(text(name_node))
+        return params
+
+    def method_label(method_node):
+        class_name = find_parent_class(method_node)
+        name = method_declaration_name(method_node)
+        return f"{class_name}.{name}" if class_name and name else name
 
     def collect_upload_vars(method_node):
         method_text = text(method_node)
@@ -404,6 +424,160 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
         )
         return chain
 
+    def summary_key(summary):
+        return (
+            summary["method_key"],
+            tuple(summary["source_params"]),
+            summary["sink"],
+            summary["sink_line"],
+            tuple(summary["missing_controls"]),
+        )
+
+    def collect_upload_summaries_for_method(method_info):
+        method_node = method_info.node
+        upload_vars = collect_upload_vars(method_node)
+        if not upload_vars:
+            return []
+
+        summaries = []
+        for sink_node, sink_desc in find_upload_sinks(method_node, upload_vars):
+            sink_offset = max(0, sink_node.start_byte - method_node.start_byte)
+            prefix = method_node.text[:sink_offset].decode()
+            controls = analyze_controls(prefix, text(sink_node), upload_vars, text(method_node))
+            if has_sufficient_validation_before(method_node, sink_node, upload_vars):
+                continue
+            source_params = sorted(var_name for var_name in upload_vars if var_name in method_info.parameters)
+            if not source_params:
+                continue
+            summaries.append(
+                {
+                    "method_node": method_node,
+                    "method_key": method_info.signature_key,
+                    "method_name": method_info.method_name,
+                    "method_label": method_info.key,
+                    "filepath": method_info.filepath,
+                    "parameters": method_info.parameters,
+                    "source_params": source_params,
+                    "sink": sink_desc,
+                    "sink_line": sink_node.start_point[0] + 1,
+                    "controls": controls,
+                    "missing_controls": [
+                        controls[key]["chain"]
+                        for key in (
+                            "extension",
+                            "content_type",
+                            "signature",
+                            "size",
+                            "count",
+                            "filename",
+                            "path",
+                            "permission",
+                            "download",
+                        )
+                        if not controls[key]["ok"]
+                    ],
+                    "chain": [method_info.key, f"{', '.join(source_params)} → {sink_desc}"],
+                }
+            )
+        return summaries
+
+    def get_project_upload_summaries():
+        return initialize_summary_cache(
+            project_index,
+            cache_attr="upload_summaries_by_key",
+            collect_fn=lambda method, _summaries_by_key: collect_upload_summaries_for_method(method),
+            key_fn=summary_key,
+            max_rounds=1,
+        )
+
+    project_summaries_by_key = get_project_upload_summaries() if project_index else None
+    interprocedural_reported = set()
+
+    def report_interprocedural_uploads(caller_method):
+        if not project_index or project_summaries_by_key is None:
+            return
+        caller_info = project_index.resolve_method(method_label(caller_method), arity=len(parameter_names(caller_method)))
+        if not caller_info:
+            return
+        local_types = project_index.variable_types_for(caller_info)
+        upload_vars = collect_upload_vars(caller_method)
+        if not upload_vars:
+            return
+
+        for node in iterate_all(caller_method):
+            if node.type != "method_invocation":
+                continue
+            callee = project_index.resolve_invocation(caller_info, node, local_types)
+            if not callee or callee.signature_key == caller_info.signature_key:
+                continue
+            summaries = project_summaries_by_key.get(callee.signature_key, [])
+            if not summaries:
+                continue
+            args = _argument_expressions(node.child_by_field_name("arguments"))
+            for summary in summaries:
+                matched = []
+                for param_name in summary["source_params"]:
+                    try:
+                        param_index = summary["parameters"].index(param_name)
+                    except ValueError:
+                        continue
+                    if param_index >= len(args):
+                        continue
+                    arg_text = text(args[param_index])
+                    matched_vars = sorted(var_name for var_name in upload_vars if re.search(rf"\b{re.escape(var_name)}\b", arg_text))
+                    for var_name in matched_vars:
+                        matched.append((param_name, var_name))
+                if not matched:
+                    continue
+
+                report_key = (
+                    caller_info.signature_key,
+                    node.start_point[0],
+                    callee.signature_key,
+                    tuple(matched),
+                )
+                if report_key in interprocedural_reported:
+                    continue
+                interprocedural_reported.add(report_key)
+
+                source_desc = ", ".join(f"`{var}` → `{param}`" for param, var in matched)
+                controls = summary["controls"]
+                boundary_desc = "클래스/파일 경계를 넘는" if summary.get("filepath") != filepath else "같은 파일 내"
+                vuln_counter[0] += 1
+                vulnerabilities.append(
+                    {
+                        "id": f"VULN-{vuln_counter[0]:03d}",
+                        "type": "DANGEROUS_FILE_UPLOAD",
+                        "file": filepath,
+                        "line": node.start_point[0] + 1,
+                        "function": find_parent_method(node),
+                        "code_snippet": text(node).strip(),
+                        "call_chain": [
+                            method_label(caller_method),
+                            f"{source_desc} → {callee.method_name}(...)",
+                            *summary.get("chain", []),
+                            *summary["missing_controls"],
+                        ],
+                        "evidence": (
+                            f"업로드 파일 {source_desc}가 line {node.start_point[0] + 1}의 `{callee.method_name}(...)` 호출을 통해 "
+                            f"`{summary['method_label']}`로 전달되고, line {summary['sink_line']}의 `{summary['sink']}` 저장 API까지 도달합니다.\n"
+                            f"{boundary_desc} 메서드 흐름에서 다음 업로드 보안 통제가 충분히 확인되지 않았습니다.\n"
+                            + "\n".join(f"- {controls[key]['text']}" for key in (
+                                "extension",
+                                "content_type",
+                                "signature",
+                                "size",
+                                "count",
+                                "filename",
+                                "path",
+                                "permission",
+                                "download",
+                            ))
+                        ),
+                        "description": "",
+                    }
+                )
+
     for method_node in iter_methods(tree.root_node):
         upload_vars = collect_upload_vars(method_node)
         if not upload_vars:
@@ -431,5 +605,6 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter):
                     "description": "",
                 }
             )
+        report_interprocedural_uploads(method_node)
 
     return [enrich_finding(vulnerability) for vulnerability in vulnerabilities]

@@ -334,6 +334,73 @@ public class SpringXssController {
     assert "HTML 이스케이프" in findings[0]["evidence"]
 
 
+def test_detectors_track_spring_request_body_dto_getter_and_field_sources(tmp_path: Path) -> None:
+    sample = tmp_path / "SpringDtoFlowController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.sql.*;
+import javax.servlet.http.*;
+import org.springframework.web.bind.annotation.*;
+
+public class SpringDtoFlowController {
+    public void sql(@RequestBody SearchRequest request, Statement stmt) throws Exception {
+        String keyword = request.getKeyword();
+        stmt.executeQuery("SELECT * FROM users WHERE name = '" + keyword + "'");
+    }
+
+    public void xss(@RequestBody SearchRequest request, HttpServletResponse response) throws IOException {
+        String keyword = request.keyword;
+        response.getWriter().println("<p>" + keyword + "</p>");
+    }
+
+    public void path(@RequestBody SearchRequest request) throws IOException {
+        String filename = request.getFileName();
+        new File("/tmp", filename);
+    }
+
+    public void command(@RequestBody SearchRequest request) throws IOException {
+        String command = request.getCommand();
+        Runtime.getRuntime().exec(command);
+    }
+}
+
+class SearchRequest {
+    public String keyword;
+
+    public String getKeyword() {
+        return keyword;
+    }
+
+    public String getFileName() {
+        return keyword;
+    }
+
+    public String getCommand() {
+        return keyword;
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = result["analysis_result"]["vulnerabilities"]
+    findings_by_type = {finding["type"]: finding for finding in findings}
+
+    assert findings_by_type["SQL_INJECTION"]["function"] == "sql"
+    assert "request.getKeyword()" in findings_by_type["SQL_INJECTION"]["evidence"]
+
+    assert findings_by_type["XSS"]["function"] == "xss"
+    assert "request.keyword" in findings_by_type["XSS"]["evidence"]
+
+    assert findings_by_type["PATH_TRAVERSAL"]["function"] == "path"
+    assert "filename" in findings_by_type["PATH_TRAVERSAL"]["evidence"]
+
+    assert findings_by_type["COMMAND_INJECTION"]["function"] == "command"
+    assert "request.getCommand()" in findings_by_type["COMMAND_INJECTION"]["evidence"]
+
+
 def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
     sample = tmp_path / "UploadController.java"
     sample.write_text(
@@ -425,6 +492,75 @@ public class UploadController {
     assert "확장자 검증: 허용목록 기반 검증이 확인되었습니다." in extension_only["evidence"]
     assert "파일 시그니쳐/Magic byte 검증: 미확인" in extension_only["evidence"]
     assert "실행권한 제거: 미확인" in extension_only["evidence"]
+
+
+def test_file_upload_tracks_multipart_file_across_controller_storage_files(tmp_path: Path) -> None:
+    controller = tmp_path / "UploadController.java"
+    storage = tmp_path / "StorageService.java"
+
+    controller.write_text(
+        """
+import java.io.*;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+public class UploadController {
+    private final StorageService storageService;
+
+    public UploadController(StorageService storageService) {
+        this.storageService = storageService;
+    }
+
+    public void upload(@RequestParam MultipartFile file) throws IOException {
+        this.storageService.save(file);
+    }
+
+    public void safeUpload(@RequestParam MultipartFile file) throws IOException {
+        this.storageService.saveStatic();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    storage.write_text(
+        """
+import java.io.*;
+import java.nio.file.*;
+import org.springframework.web.multipart.MultipartFile;
+
+public class StorageService {
+    public void save(MultipartFile file) throws IOException {
+        Path target = Paths.get("uploads", file.getOriginalFilename());
+        file.transferTo(target);
+    }
+
+    public void saveStatic() throws IOException {
+        Files.writeString(Paths.get("uploads", "notice.txt"), "ok");
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "DANGEROUS_FILE_UPLOAD"
+    ]
+    controller_findings = [
+        finding
+        for finding in findings
+        if finding["function"] == "upload"
+    ]
+
+    assert controller_findings
+    finding = controller_findings[0]
+    assert "StorageService.save" in " ".join(finding["call_chain"])
+    assert "MultipartFile.transferTo" in " ".join(finding["call_chain"])
+    assert "클래스/파일 경계" in finding["evidence"]
+    assert "파일 시그니쳐/Magic byte 검증" in finding["evidence"]
+    assert not any(finding["function"] == "safeUpload" for finding in findings)
 
 
 def test_hardcoded_secret_detects_declaration_even_without_sensitive_usage(tmp_path: Path) -> None:
@@ -843,6 +979,67 @@ public class CommandListController {
     assert "명령 인자 컬렉션" in finding["evidence"]
     assert "ProcessBuilder.command" in finding["confidence_reason"]
     assert not any(finding["function"] == "safeConstantList" for finding in findings)
+
+
+def test_command_injection_tracks_taint_across_controller_executor_files(tmp_path: Path) -> None:
+    controller = tmp_path / "CommandController.java"
+    executor = tmp_path / "CommandExecutor.java"
+
+    controller.write_text(
+        """
+import java.io.*;
+import org.springframework.web.bind.annotation.*;
+
+public class CommandController {
+    private final CommandExecutor executor;
+
+    public CommandController(CommandExecutor executor) {
+        this.executor = executor;
+    }
+
+    public Process run(@RequestParam String command) throws IOException {
+        return this.executor.execute(command);
+    }
+
+    public Process safeRun() throws IOException {
+        return this.executor.executeStatic();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    executor.write_text(
+        """
+import java.io.*;
+
+public class CommandExecutor {
+    public Process execute(String command) throws IOException {
+        return Runtime.getRuntime().exec(command);
+    }
+
+    public Process executeStatic() throws IOException {
+        return Runtime.getRuntime().exec("uptime");
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "COMMAND_INJECTION"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["run"]
+    finding = findings[0]
+    assert "Spring MVC source parameter" in finding["evidence"]
+    assert "CommandController.run" in finding["call_chain"]
+    assert "CommandExecutor.execute" in finding["call_chain"]
+    assert "Runtime.exec" in finding["call_chain"][-1]
+    assert "inter-procedural" in finding["confidence_reason"]
+    assert not any(finding["function"] == "safeRun" for finding in findings)
 
 
 def test_insecure_random_requires_security_context(tmp_path: Path) -> None:

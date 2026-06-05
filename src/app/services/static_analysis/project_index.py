@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.app.services.static_analysis.parser import find_parent_class, iterate_all
+from src.app.services.static_analysis.rules import SPRING_MVC_SOURCE_ANNOTATIONS
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,8 @@ class ProjectIndex:
     sql_summaries_by_key: dict[str, list[dict]] | None = None
     path_summaries_by_key: dict[str, list[dict]] | None = None
     xss_summaries_by_key: dict[str, list[dict]] | None = None
+    command_summaries_by_key: dict[str, list[dict]] | None = None
+    upload_summaries_by_key: dict[str, list[dict]] | None = None
 
     def variable_types_for(self, method: MethodInfo) -> dict[str, str]:
         variable_types = {}
@@ -261,16 +264,6 @@ def _parameter_names(method_node: object) -> list[str]:
         if name_node and _node_text(name_node) not in parameters:
             parameters.append(_node_text(name_node))
     return parameters
-
-
-SPRING_MVC_SOURCE_ANNOTATIONS = {
-    "RequestParam",
-    "PathVariable",
-    "RequestHeader",
-    "CookieValue",
-    "RequestBody",
-    "ModelAttribute",
-}
 
 
 def _spring_source_parameter_names(method_node: object) -> set[str]:

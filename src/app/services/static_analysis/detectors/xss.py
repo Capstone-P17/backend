@@ -2,54 +2,26 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
+from src.app.services.static_analysis.rules import (
+    HTTP_REQUEST_SOURCE_METHODS,
+    XSS_HTML_FRAGMENTS,
+    XSS_OUTPUT_METHODS,
+    XSS_SANITIZER_METHODS,
+)
+from src.app.services.static_analysis.taint_summary import (
+    argument_expressions as _argument_expressions,
+    identifiers as _identifiers,
+    initialize_summary_cache,
+    node_text as _node_text,
+    referenced_vars as _referenced_vars,
+    source_member_label,
+    unique_summaries,
+)
 
-INPUT_METHODS = ["getParameter", "getHeader", "getHeaders", "getCookies", "getQueryString", "getRequestURI"]
-OUTPUT_METHODS = ["println", "print", "write", "append", "format"]
-HTML_FRAGMENTS = ["<", ">", "</", "/>", "<h1", "<div", "<span", "<p", "<script", "<img", "<a "]
-SANITIZER_METHODS = [
-    "escapeHtml",
-    "escapeHtml4",
-    "escapeHtml3",
-    "htmlEscape",
-    "htmlEscapeDecimal",
-    "htmlEscapeHex",
-    "encodeForHTML",
-    "encodeForHtml",
-    "encodeForHTMLAttribute",
-    "encodeForHtmlAttribute",
-    "forHtml",
-    "forHtmlContent",
-    "forHtmlAttribute",
-    "clean",
-    "sanitize",
-]
-
-
-def _node_text(node):
-    return node.text.decode() if node else ""
-
-
-def _argument_expressions(arguments_node):
-    if not arguments_node:
-        return []
-    return [child for child in arguments_node.children if child.is_named]
-
-
-def _identifiers(node):
-    return {_node_text(child) for child in iterate_all(node) if child.type == "identifier"}
-
-
-def _referenced_vars(node, var_names):
-    seen = set()
-    refs = []
-    for child in iterate_all(node):
-        if child.type != "identifier":
-            continue
-        name = _node_text(child)
-        if name in var_names and name not in seen:
-            seen.add(name)
-            refs.append(name)
-    return refs
+INPUT_METHODS = HTTP_REQUEST_SOURCE_METHODS
+OUTPUT_METHODS = XSS_OUTPUT_METHODS
+HTML_FRAGMENTS = XSS_HTML_FRAGMENTS
+SANITIZER_METHODS = XSS_SANITIZER_METHODS
 
 
 def _method_invocation_name(node):
@@ -86,34 +58,14 @@ def _return_expression(node):
 
 
 def _get_project_xss_summaries(project_index):
-    if project_index is None:
-        return {}
-    if project_index.xss_summaries_by_key is not None:
-        return project_index.xss_summaries_by_key
-
-    summaries_by_key = {method.signature_key: [] for method in project_index.methods}
-    for method in project_index.methods:
-        summaries_by_key[method.signature_key].extend(
-            _collect_xss_summaries_for_method(method, project_index, summaries_by_key)
-        )
-
-    for _ in range(4):
-        changed = False
-        for method in project_index.methods:
-            current = summaries_by_key.setdefault(method.signature_key, [])
-            existing = {_summary_key(summary) for summary in current}
-            for summary in _collect_xss_summaries_for_method(method, project_index, summaries_by_key):
-                key = _summary_key(summary)
-                if key in existing:
-                    continue
-                current.append(summary)
-                existing.add(key)
-                changed = True
-        if not changed:
-            break
-
-    project_index.xss_summaries_by_key = summaries_by_key
-    return summaries_by_key
+    return initialize_summary_cache(
+        project_index,
+        cache_attr="xss_summaries_by_key",
+        collect_fn=lambda method, summaries_by_key: _collect_xss_summaries_for_method(
+            method, project_index, summaries_by_key
+        ),
+        key_fn=_summary_key,
+    )
 
 
 def _collect_xss_summaries_for_method(method, project_index, summaries_by_key):
@@ -281,10 +233,7 @@ def _collect_xss_summaries_for_method(method, project_index, summaries_by_key):
 
         stack.extend(reversed(node.children))
 
-    unique = {}
-    for summary in summaries:
-        unique.setdefault(_summary_key(summary), summary)
-    return list(unique.values())
+    return unique_summaries(summaries, _summary_key)
 
 
 def _summary_key(summary):
@@ -390,6 +339,14 @@ def detect_xss(filepath, tree, vuln_counter, project_index=None):
                 remember_taint(var_name, statement_node)
             elif source_var:
                 remember_taint(var_name, statement_node, source_var)
+                member_label = source_member_label(
+                    value_node,
+                    {source_var},
+                    source_labels={name: info.get("input_call", f"`{name}`") for name, info in user_input_vars.items()},
+                )
+                if member_label:
+                    user_input_vars[var_name]["input_call"] = member_label
+                    user_input_vars[var_name]["code"] = member_label
                 if source_var in unsafe_html_vars:
                     unsafe_html_vars[var_name] = dict(unsafe_html_vars[source_var])
             elif sanitized_source_var:
@@ -429,8 +386,13 @@ def detect_xss(filepath, tree, vuln_counter, project_index=None):
             if refs:
                 first_var = refs[0]
                 info = user_input_vars.get(first_var, {})
+                member_label = source_member_label(
+                    node,
+                    refs,
+                    source_labels={name: source.get("input_call", f"`{name}`") for name, source in user_input_vars.items()},
+                )
                 return {
-                    "label": info.get("input_call") or f"`{first_var}`",
+                    "label": member_label or info.get("input_call") or f"`{first_var}`",
                     "line": info.get("line") or node.start_point[0] + 1,
                 }
             return None

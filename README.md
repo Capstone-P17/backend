@@ -53,6 +53,7 @@ LLM은 detector가 만든 코드 위치, 호출 경로, evidence, 공식 가이�
 `OPENAI_API_KEY`가 비어 있거나 LLM 호출이 실패해도 정적 분석 결과는 유지되며, detector metadata 기반 fallback 설명과 수정 예시가 제공됩니다.
 
 - [LLM 역할과 Grounding 정책](docs/llm-role-and-grounding.md)
+- [Source/Sink/Sanitizer 탐지 모델](docs/source-sink-sanitizer-model.md)
 
 ## 공식 가이드 기준
 

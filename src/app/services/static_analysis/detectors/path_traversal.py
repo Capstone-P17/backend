@@ -2,38 +2,19 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
+from src.app.services.static_analysis.rules import HTTP_REQUEST_SOURCE_METHODS, PATH_FILE_TYPES
+from src.app.services.static_analysis.taint_summary import (
+    argument_expressions as _argument_expressions,
+    identifiers as _identifiers,
+    initialize_summary_cache,
+    node_text as _node_text,
+    referenced_vars as _referenced_vars,
+    source_member_label,
+    unique_summaries,
+)
 
-INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI", "getPathInfo"]
-FILE_TYPES = ["File", "FileInputStream", "FileOutputStream", "FileReader", "FileWriter", "RandomAccessFile"]
-
-
-def _node_text(node):
-    return node.text.decode() if node else ""
-
-
-def _argument_expressions(arguments_node):
-    if not arguments_node:
-        return []
-    return [child for child in arguments_node.children if child.is_named]
-
-
-def _identifiers(node):
-    if node is None:
-        return set()
-    return {_node_text(child) for child in iterate_all(node) if child.type == "identifier"}
-
-
-def _referenced_vars(node, var_names):
-    seen = set()
-    refs = []
-    for child in iterate_all(node):
-        if child.type != "identifier":
-            continue
-        name = _node_text(child)
-        if name in var_names and name not in seen:
-            seen.add(name)
-            refs.append(name)
-    return refs
+INPUT_METHODS = HTTP_REQUEST_SOURCE_METHODS
+FILE_TYPES = PATH_FILE_TYPES
 
 
 def _method_invocation_name(node):
@@ -74,34 +55,14 @@ def _sink_arguments(node):
 
 
 def _get_project_path_summaries(project_index):
-    if project_index is None:
-        return {}
-    if project_index.path_summaries_by_key is not None:
-        return project_index.path_summaries_by_key
-
-    summaries_by_key = {method.signature_key: [] for method in project_index.methods}
-    for method in project_index.methods:
-        summaries_by_key[method.signature_key].extend(
-            _collect_path_summaries_for_method(method, project_index, summaries_by_key)
-        )
-
-    for _ in range(4):
-        changed = False
-        for method in project_index.methods:
-            current = summaries_by_key.setdefault(method.signature_key, [])
-            existing = {_summary_key(summary) for summary in current}
-            for summary in _collect_path_summaries_for_method(method, project_index, summaries_by_key):
-                key = _summary_key(summary)
-                if key in existing:
-                    continue
-                current.append(summary)
-                existing.add(key)
-                changed = True
-        if not changed:
-            break
-
-    project_index.path_summaries_by_key = summaries_by_key
-    return summaries_by_key
+    return initialize_summary_cache(
+        project_index,
+        cache_attr="path_summaries_by_key",
+        collect_fn=lambda method, summaries_by_key: _collect_path_summaries_for_method(
+            method, project_index, summaries_by_key
+        ),
+        key_fn=_summary_key,
+    )
 
 
 def _collect_path_summaries_for_method(method, project_index, summaries_by_key):
@@ -218,10 +179,7 @@ def _collect_path_summaries_for_method(method, project_index, summaries_by_key):
 
         stack.extend(reversed(node.children))
 
-    unique = {}
-    for summary in summaries:
-        unique.setdefault(_summary_key(summary), summary)
-    return list(unique.values())
+    return unique_summaries(summaries, _summary_key)
 
 
 def _summary_key(summary):
@@ -526,6 +484,16 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
             refs = _referenced_vars(node, caller_tainted_vars)
             if refs:
                 first_var = refs[0]
+                member_label = source_member_label(
+                    node,
+                    refs,
+                    source_labels={name: info.get("label", f"`{name}`") for name, info in caller_taint_sources.items()},
+                )
+                if member_label:
+                    return {
+                        "label": member_label,
+                        "line": node.start_point[0] + 1,
+                    }
                 return caller_taint_sources.get(
                     first_var,
                     {"label": f"`{first_var}`", "line": node.start_point[0] + 1},

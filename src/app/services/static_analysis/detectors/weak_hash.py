@@ -2,35 +2,15 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
+from src.app.services.static_analysis.rules import (
+    KDF_OR_PASSWORD_HASH_TERMS,
+    NON_PASSWORD_CONTEXT_TERMS,
+    PASSWORD_CONTEXT_TERMS,
+    SALT_TERMS,
+    WEAK_HASH_ALGORITHMS,
+)
 
-WEAK_ALGORITHMS = {"MD5", "MD4", "MD2", "SHA-1", "SHA1"}
-PASSWORD_CONTEXT_TERMS = (
-    "password",
-    "passwd",
-    "pwd",
-    "credential",
-    "credentials",
-    "secret",
-    "token",
-    "auth",
-)
-NON_PASSWORD_CONTEXT_TERMS = (
-    "checksum",
-    "etag",
-    "fingerprint",
-    "file",
-    "bytes",
-    "integrity",
-)
-KDF_OR_PASSWORD_HASH_TERMS = (
-    "PBKDF2",
-    "SecretKeyFactory",
-    "PBEKeySpec",
-    "BCrypt",
-    "SCrypt",
-    "Argon2",
-)
-SALT_TERMS = ("salt", "gensalt")
+WEAK_ALGORITHMS = set(WEAK_HASH_ALGORITHMS)
 
 
 def _node_text(node) -> str:

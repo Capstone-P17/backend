@@ -8,19 +8,27 @@ from src.app.services.static_analysis.parser import (
     find_parent_method,
     iterate_all,
 )
+from src.app.services.static_analysis.rules import (
+    HTTP_REQUEST_SOURCE_METHODS,
+    SQL_BUILDER_METHODS,
+    SQL_EXEC_METHODS,
+    SQL_KEYWORDS,
+    SQL_PREPARE_METHODS,
+)
+from src.app.services.static_analysis.taint_summary import (
+    argument_expressions as _argument_expressions,
+    identifiers as _identifiers,
+    initialize_summary_cache,
+    node_text as _node_text,
+    referenced_vars as _referenced_vars,
+    source_member_label,
+    unique_summaries,
+)
 
-SQL_EXEC_METHODS = ["executeQuery", "executeUpdate", "execute"]
-SQL_PREPARE_METHODS = ["prepareStatement"]
 SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS
-SQL_KEYWORDS = ["SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE"]
 SQL_KEYWORD_PATTERN = re.compile(r"\b(?:" + "|".join(SQL_KEYWORDS) + r")\b", re.IGNORECASE)
-INPUT_METHODS = ["getParameter", "getHeader", "getCookies", "getQueryString", "getRequestURI"]
-SQL_BUILDER_METHODS = ["format", "formatted", "concat"]
+INPUT_METHODS = HTTP_REQUEST_SOURCE_METHODS
 SQL_LITERAL_NODE_TYPES = {"string_literal", "text_block"}
-
-
-def _node_text(node):
-    return node.text.decode()
 
 
 def _method_invocation_name(node):
@@ -28,29 +36,6 @@ def _method_invocation_name(node):
         return None
     name_node = node.child_by_field_name("name")
     return _node_text(name_node) if name_node else None
-
-
-def _argument_expressions(arguments_node):
-    if not arguments_node:
-        return []
-    return [child for child in arguments_node.children if child.is_named]
-
-
-def _identifiers(node):
-    return {_node_text(child) for child in iterate_all(node) if child.type == "identifier"}
-
-
-def _referenced_vars(node, var_names):
-    seen = set()
-    refs = []
-    for child in iterate_all(node):
-        if child.type != "identifier":
-            continue
-        name = _node_text(child)
-        if name in var_names and name not in seen:
-            seen.add(name)
-            refs.append(name)
-    return refs
 
 
 def _find_input_call(node):
@@ -91,32 +76,14 @@ def _build_sink_name(node):
 
 
 def _get_project_sql_summaries(project_index):
-    if project_index is None:
-        return {}
-    if project_index.sql_summaries_by_key is not None:
-        return project_index.sql_summaries_by_key
-
-    summaries_by_key = {method.signature_key: [] for method in project_index.methods}
-    for method in project_index.methods:
-        summaries_by_key[method.signature_key].extend(_collect_sql_summaries_for_method(method, project_index, summaries_by_key))
-
-    for _ in range(4):
-        changed = False
-        for method in project_index.methods:
-            current = summaries_by_key.setdefault(method.signature_key, [])
-            existing = {_summary_key(summary) for summary in current}
-            for summary in _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
-                key = _summary_key(summary)
-                if key in existing:
-                    continue
-                current.append(summary)
-                existing.add(key)
-                changed = True
-        if not changed:
-            break
-
-    project_index.sql_summaries_by_key = summaries_by_key
-    return summaries_by_key
+    return initialize_summary_cache(
+        project_index,
+        cache_attr="sql_summaries_by_key",
+        collect_fn=lambda method, summaries_by_key: _collect_sql_summaries_for_method(
+            method, project_index, summaries_by_key
+        ),
+        key_fn=_summary_key,
+    )
 
 
 def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
@@ -261,10 +228,7 @@ def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
 
         stack.extend(reversed(node.children))
 
-    unique = {}
-    for summary in summaries:
-        unique.setdefault(_summary_key(summary), summary)
-    return list(unique.values())
+    return unique_summaries(summaries, _summary_key)
 
 
 def _summary_key(summary):
@@ -397,7 +361,10 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
                 taint_sources[var_name] = f"`{text(input_call)}`에서 온 `{var_name}`"
             elif source_vars:
                 tainted_vars.add(var_name)
-                taint_sources[var_name] = taint_sources.get(source_vars[0], f"`{source_vars[0]}`")
+                taint_sources[var_name] = (
+                    source_member_label(value_node, source_vars, source_labels=taint_sources)
+                    or taint_sources.get(source_vars[0], f"`{source_vars[0]}`")
+                )
             elif expression_has_taint(value_node):
                 tainted_vars.add(var_name)
                 taint_sources[var_name] = f"`{var_name}`"
@@ -411,6 +378,9 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
             if input_call:
                 return f"`{text(input_call)}`"
             if source_vars:
+                member_label = source_member_label(node, source_vars, source_labels=taint_sources)
+                if member_label:
+                    return member_label
                 return ", ".join(taint_sources.get(var_name, f"`{var_name}`") for var_name in source_vars)
             return "외부 입력 값"
 
@@ -589,6 +559,16 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
             source_vars = referenced_tainted_vars(node, caller_tainted_vars)
             if source_vars:
                 first_var = source_vars[0]
+                member_label = source_member_label(
+                    node,
+                    source_vars,
+                    source_labels={name: info.get("label", f"`{name}`") for name, info in caller_taint_sources.items()},
+                )
+                if member_label:
+                    return {
+                        "label": member_label,
+                        "line": node.start_point[0] + 1,
+                    }
                 return caller_taint_sources.get(
                     first_var,
                     {"label": f"`{first_var}`", "line": node.start_point[0] + 1},

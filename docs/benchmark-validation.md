@@ -39,7 +39,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 | SQL Injection | OWASP BenchmarkJava | TP/TN 확인 | 취약 SQL 결합은 탐지하고, OWASP safe SQLi 샘플은 탐지하지 않는다. SQL 키워드는 문자열 리터럴 기준으로 판정해 주석/로그/일반 문자열 오탐 가능성을 줄인다. Spring MVC annotation 파라미터를 입력 source로 반영한다. |
 | Weak Hash | OWASP BenchmarkJava, Juliet | TP/TN 확인 | MD2/MD5/SHA-1 계열 약한 해시 사용을 탐지한다. |
 | Insecure Random | Juliet | TP 확인 | `java.util.Random` 기반 약한 난수 사용을 탐지한다. |
-| Command Injection | OWASP BenchmarkJava | TP 확인 | `List`에 명령 인자를 쌓고 `ProcessBuilder.command(argList)`로 넘기는 흐름을 탐지한다. |
+| Command Injection | OWASP BenchmarkJava | TP 확인 | `List`에 명령 인자를 쌓고 `ProcessBuilder.command(argList)`로 넘기는 흐름과, Controller 입력이 CommandExecutor를 거쳐 `Runtime.exec`로 전달되는 클래스/파일 경계 흐름을 탐지한다. |
 | Path Traversal | OWASP BenchmarkJava | TP 확인 | 쿠키 값이 중간 변수에 저장되고 파일명 변수에 결합된 뒤 `FileInputStream`으로 전달되는 흐름과, Controller 입력이 Service/FileService 구현체를 거쳐 파일 접근 API로 전달되는 클래스/파일 경계 흐름을 탐지한다. Spring MVC annotation 파라미터를 입력 source로 반영한다. |
 | XSS | OWASP BenchmarkJava, Juliet | TP 확인 | 분기 내부 `getParameter` 할당 후 후속 HTML 출력 sink로 전달되는 흐름, HTML 응답에서 header 값이 `format()` 출력으로 전달되는 흐름, Controller 입력이 Renderer/Service 구현체를 거쳐 HTML 반환값으로 출력되는 클래스/파일 경계 흐름을 탐지한다. Spring MVC annotation 파라미터를 입력 source로 반영한다. |
 | Hardcoded Secret | Juliet | TP 확인 | generic 변수명 `data`에 문자열 리터럴이 할당된 뒤 `DriverManager.getConnection(..., data)` 비밀번호 인자로 사용되는 흐름을 탐지한다. |
@@ -71,7 +71,10 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 ## 최근 개선 내역
 
 - Spring MVC source: `@RequestParam`, `@PathVariable`, `@RequestHeader`, `@CookieValue`, `@RequestBody`, `@ModelAttribute`가 붙은 메서드 파라미터를 사용자 입력 source로 인식해 SQL Injection, XSS, Path Traversal 흐름에 연결하도록 개선했다.
+- Spring MVC DTO source: `@RequestBody request`에서 파생되는 `request.getX()` getter와 `request.field` 필드 접근을 source 객체 기반 taint 흐름으로 유지해 SQL Injection, XSS, Path Traversal, Command Injection에 연결하도록 개선했다.
+- Command Injection: 프로젝트 단위 method index를 사용해 `Controller -> CommandExecutor -> Runtime.exec(...)`처럼 클래스/파일 경계를 넘는 명령 실행 흐름을 탐지하도록 개선했다.
 - Command Injection: OWASP BenchmarkTest00006의 `request.getHeader(...) -> param -> argList.add(...) -> ProcessBuilder.command(argList)` 흐름을 탐지하도록 개선했다.
+- File Upload: 프로젝트 단위 method index를 사용해 `Controller MultipartFile -> StorageService.save(file) -> transferTo/Files.copy`처럼 클래스/파일 경계를 넘는 업로드 저장 흐름을 탐지하도록 개선했다.
 - Path Traversal: 프로젝트 단위 method index를 사용해 `Controller -> Service/FileService 구현체 -> FileInputStream`처럼 클래스/파일 경계를 넘는 경로 조작 흐름을 탐지하도록 개선했다.
 - Path Traversal: OWASP BenchmarkTest00001의 `request.getCookies() -> Cookie.getValue() -> fileName -> FileInputStream` 흐름을 탐지하도록 개선했다.
 - XSS: 프로젝트 단위 method index를 사용해 `Controller -> Renderer/Service 구현체 -> HTML 반환값 -> response.write(...)`처럼 클래스/파일 경계를 넘는 출력 흐름을 탐지하도록 개선했다.
