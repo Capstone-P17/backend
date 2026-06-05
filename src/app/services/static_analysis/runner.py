@@ -86,7 +86,7 @@ def analyze_directory(directory, repository=""):
         file_vulnerabilities += detect_hardcoded_secrets(filepath, tree, vuln_counter)
         file_vulnerabilities += detect_sql_injection(filepath, tree, vuln_counter, project_index=project_index)
         file_vulnerabilities += detect_xss(filepath, tree, vuln_counter)
-        file_vulnerabilities += detect_path_traversal(filepath, tree, vuln_counter)
+        file_vulnerabilities += detect_path_traversal(filepath, tree, vuln_counter, project_index=project_index)
         file_vulnerabilities += detect_command_injection(filepath, tree, vuln_counter)
         file_vulnerabilities += detect_insecure_random(filepath, tree, vuln_counter)
         file_vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)

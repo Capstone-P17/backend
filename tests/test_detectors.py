@@ -547,6 +547,82 @@ public class PathFlowController {
     assert not any(finding["function"] == "safeConstantFile" for finding in findings)
 
 
+def test_path_traversal_tracks_taint_across_controller_service_files(tmp_path: Path) -> None:
+    controller = tmp_path / "PathController.java"
+    service = tmp_path / "FileService.java"
+    implementation = tmp_path / "LocalFileService.java"
+
+    controller.write_text(
+        """
+import java.io.*;
+import javax.servlet.http.*;
+
+public class PathController {
+    private final FileService fileService;
+
+    public PathController(FileService fileService) {
+        this.fileService = fileService;
+    }
+
+    public InputStream download(HttpServletRequest request) throws Exception {
+        String name = request.getParameter("file");
+        return this.fileService.open(name);
+    }
+
+    public InputStream safeDownload() throws Exception {
+        return this.fileService.openStatic();
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    service.write_text(
+        """
+import java.io.*;
+
+public interface FileService {
+    InputStream open(String name) throws Exception;
+    InputStream openStatic() throws Exception;
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    implementation.write_text(
+        """
+import java.io.*;
+
+public class LocalFileService implements FileService {
+    public InputStream open(String name) throws Exception {
+        String target = "/var/app/files/" + name;
+        return new FileInputStream(new File(target));
+    }
+
+    public InputStream openStatic() throws Exception {
+        return new FileInputStream(new File("/var/app/files/help.txt"));
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "PATH_TRAVERSAL"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["download"]
+    finding = findings[0]
+    assert "PathController.download" in finding["call_chain"][0]
+    assert any("LocalFileService.open" in step for step in finding["call_chain"])
+    assert any("FileInputStream" in step for step in finding["call_chain"])
+    assert "클래스/파일 경계" in finding["evidence"]
+    assert "request.getParameter" in finding["evidence"]
+    assert "inter-procedural" in finding["confidence_reason"]
+    assert not any(finding["function"] == "safeDownload" for finding in findings)
+
+
 def test_command_injection_tracks_tainted_list_into_process_builder_command(tmp_path: Path) -> None:
     sample = tmp_path / "CommandListController.java"
     sample.write_text(
