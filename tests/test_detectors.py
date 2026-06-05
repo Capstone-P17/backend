@@ -804,21 +804,25 @@ import java.sql.*;
 import javax.servlet.http.*;
 
 public class UserController {
-    private UserService userService;
+    private final UserService userService;
+
+    public UserController(UserService service) {
+        this.userService = service;
+    }
 
     public ResultSet search(HttpServletRequest req, Statement stmt) throws Exception {
         String id = req.getParameter("id");
-        return userService.findUser(id, stmt);
+        return this.userService.findUser(id, stmt);
     }
 
     public ResultSet safeSearch(HttpServletRequest req, Connection conn) throws Exception {
         String id = req.getParameter("id");
-        return userService.findUserSafely(id, conn);
+        return this.userService.findUserSafely(id, conn);
     }
 
     public ResultSet overloadedSafeSearch(HttpServletRequest req, Connection conn) throws Exception {
         String id = req.getParameter("id");
-        return userService.findUser(id);
+        return this.userService.findUser(id);
     }
 }
 """.strip(),
@@ -829,18 +833,22 @@ public class UserController {
 import java.sql.*;
 
 public class UserService {
-    private UserDao dao;
+    private final UserDao dao;
+
+    public UserService(UserDao userDao) {
+        this.dao = userDao;
+    }
 
     public ResultSet findUser(String id, Statement stmt) throws Exception {
-        return dao.findById(id, stmt);
+        return this.dao.findById(id, stmt);
     }
 
     public ResultSet findUser(String id) throws Exception {
-        return dao.findStatic();
+        return this.dao.findStatic();
     }
 
     public ResultSet findUserSafely(String id, Connection conn) throws Exception {
-        return dao.findByIdSafely(id, conn);
+        return this.dao.findByIdSafely(id, conn);
     }
 }
 """.strip(),

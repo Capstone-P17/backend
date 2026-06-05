@@ -58,7 +58,7 @@ class ProjectIndex:
 
         object_node = invocation_node.child_by_field_name("object")
         if object_node:
-            object_name = _node_text(object_node)
+            object_name = _normalize_object_name(_node_text(object_node))
             class_name = local_types.get(object_name) or object_name
             method = self._resolve_candidate(f"{class_name}.{callee_name}", arity=arity)
             if method:
@@ -92,7 +92,9 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
             if not class_name_node:
                 continue
             class_name = _node_text(class_name_node)
-            index.class_field_types.setdefault(class_name, {}).update(_field_types_for_class(class_node))
+            field_types = _field_types_for_class(class_node)
+            field_types.update(_constructor_injected_field_types(class_node, field_types))
+            index.class_field_types.setdefault(class_name, {}).update(field_types)
 
         for method_node in iterate_all(tree.root_node):
             if method_node.type != "method_declaration":
@@ -142,6 +144,56 @@ def _field_types_for_class(class_node: object) -> dict[str, str]:
     return field_types
 
 
+def _constructor_injected_field_types(class_node: object, existing_field_types: dict[str, str]) -> dict[str, str]:
+    injected_types = {}
+    for constructor_node in iterate_all(class_node):
+        if constructor_node.type != "constructor_declaration":
+            continue
+
+        parameter_types = _parameter_types_by_name(constructor_node)
+        if not parameter_types:
+            continue
+
+        for node in iterate_all(constructor_node):
+            if node.type != "assignment_expression":
+                continue
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if not left or not right or right.type != "identifier":
+                continue
+
+            field_name = _assigned_field_name(left)
+            parameter_name = _node_text(right)
+            parameter_type = parameter_types.get(parameter_name)
+            if field_name and parameter_type:
+                injected_types[field_name] = existing_field_types.get(field_name, parameter_type)
+    return injected_types
+
+
+def _parameter_types_by_name(method_or_constructor_node: object) -> dict[str, str]:
+    parameter_types = {}
+    for node in iterate_all(method_or_constructor_node):
+        if node.type != "formal_parameter":
+            continue
+        name_node = node.child_by_field_name("name")
+        type_node = node.child_by_field_name("type")
+        if name_node and type_node:
+            parameter_types[_node_text(name_node)] = _clean_type_name(_node_text(type_node))
+    return parameter_types
+
+
+def _assigned_field_name(node: object) -> str | None:
+    if node.type == "identifier":
+        return _node_text(node)
+    if node.type == "field_access":
+        field_node = node.child_by_field_name("field")
+        if not field_node:
+            identifiers = [child for child in node.children if child.type == "identifier"]
+            field_node = identifiers[-1] if identifiers else None
+        return _node_text(field_node) if field_node else None
+    return None
+
+
 def _parameter_names(method_node: object) -> list[str]:
     parameters = []
     for node in iterate_all(method_node):
@@ -157,7 +209,11 @@ def _declaration_type_name(declaration_node: object) -> str | None:
     type_node = declaration_node.child_by_field_name("type")
     if not type_node:
         return None
-    type_text = _node_text(type_node).strip()
+    return _clean_type_name(_node_text(type_node))
+
+
+def _clean_type_name(type_text: str) -> str | None:
+    type_text = type_text.strip()
     if not type_text:
         return None
     return type_text.split("<", 1)[0].split("[", 1)[0].strip()
@@ -165,6 +221,10 @@ def _declaration_type_name(declaration_node: object) -> str | None:
 
 def _node_text(node: object) -> str:
     return node.text.decode()
+
+
+def _normalize_object_name(name: str) -> str:
+    return name[5:] if name.startswith("this.") else name
 
 
 def _argument_expressions(arguments_node: object | None) -> list[object]:
