@@ -14,13 +14,16 @@ class MethodInfo:
     method_name: str
     parameters: list[str]
     key: str
+    signature_key: str
 
 
 @dataclass
 class ProjectIndex:
     methods: list[MethodInfo] = field(default_factory=list)
     methods_by_key: dict[str, MethodInfo] = field(default_factory=dict)
+    methods_by_qualified_name: dict[str, list[MethodInfo]] = field(default_factory=dict)
     methods_by_name: dict[str, list[MethodInfo]] = field(default_factory=dict)
+    methods_by_node_id: dict[int, MethodInfo] = field(default_factory=dict)
     class_field_types: dict[str, dict[str, str]] = field(default_factory=dict)
     sql_summaries_by_key: dict[str, list[dict]] | None = None
 
@@ -51,21 +54,31 @@ class ProjectIndex:
         if not name_node:
             return None
         callee_name = _node_text(name_node)
+        arity = len(_argument_expressions(invocation_node.child_by_field_name("arguments")))
 
         object_node = invocation_node.child_by_field_name("object")
         if object_node:
             object_name = _node_text(object_node)
             class_name = local_types.get(object_name) or object_name
-            method = self.methods_by_key.get(f"{class_name}.{callee_name}")
+            method = self._resolve_candidate(f"{class_name}.{callee_name}", arity=arity)
             if method:
                 return method
-            return _unique(self.methods_by_name.get(callee_name, []))
+            return _unique_by_arity(self.methods_by_name.get(callee_name, []), arity=arity)
 
         if caller.class_name:
-            method = self.methods_by_key.get(f"{caller.class_name}.{callee_name}")
+            method = self._resolve_candidate(f"{caller.class_name}.{callee_name}", arity=arity)
             if method:
                 return method
-        return _unique(self.methods_by_name.get(callee_name, []))
+        return _unique_by_arity(self.methods_by_name.get(callee_name, []), arity=arity)
+
+    def method_for_node(self, node: object) -> MethodInfo | None:
+        return self.methods_by_node_id.get(id(node))
+
+    def resolve_method(self, qualified_name: str, *, arity: int) -> MethodInfo | None:
+        return self._resolve_candidate(qualified_name, arity=arity)
+
+    def _resolve_candidate(self, qualified_name: str, *, arity: int) -> MethodInfo | None:
+        return _unique_by_arity(self.methods_by_qualified_name.get(qualified_name, []), arity=arity)
 
 
 def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectIndex:
@@ -89,6 +102,7 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
                 continue
             class_name = find_parent_class(method_node)
             method_name = _node_text(method_name_node)
+            parameters = _parameter_names(method_node)
             key = f"{class_name}.{method_name}" if class_name else method_name
             method = MethodInfo(
                 filepath=filepath,
@@ -96,12 +110,15 @@ def build_project_index(parsed_files: list[tuple[str, object, str]]) -> ProjectI
                 node=method_node,
                 class_name=class_name,
                 method_name=method_name,
-                parameters=_parameter_names(method_node),
+                parameters=parameters,
                 key=key,
+                signature_key=f"{key}/{len(parameters)}",
             )
             index.methods.append(method)
-            index.methods_by_key[key] = method
+            index.methods_by_key[method.signature_key] = method
+            index.methods_by_qualified_name.setdefault(key, []).append(method)
             index.methods_by_name.setdefault(method_name, []).append(method)
+            index.methods_by_node_id[id(method_node)] = method
 
     return index
 
@@ -150,5 +167,12 @@ def _node_text(node: object) -> str:
     return node.text.decode()
 
 
-def _unique(methods: list[MethodInfo]) -> MethodInfo | None:
-    return methods[0] if len(methods) == 1 else None
+def _argument_expressions(arguments_node: object | None) -> list[object]:
+    if not arguments_node:
+        return []
+    return [child for child in arguments_node.children if child.is_named]
+
+
+def _unique_by_arity(methods: list[MethodInfo], *, arity: int) -> MethodInfo | None:
+    matched = [method for method in methods if len(method.parameters) == arity]
+    return matched[0] if len(matched) == 1 else None

@@ -96,14 +96,14 @@ def _get_project_sql_summaries(project_index):
     if project_index.sql_summaries_by_key is not None:
         return project_index.sql_summaries_by_key
 
-    summaries_by_key = {method.key: [] for method in project_index.methods}
+    summaries_by_key = {method.signature_key: [] for method in project_index.methods}
     for method in project_index.methods:
-        summaries_by_key[method.key].extend(_collect_sql_summaries_for_method(method, project_index, summaries_by_key))
+        summaries_by_key[method.signature_key].extend(_collect_sql_summaries_for_method(method, project_index, summaries_by_key))
 
     for _ in range(4):
         changed = False
         for method in project_index.methods:
-            current = summaries_by_key.setdefault(method.key, [])
+            current = summaries_by_key.setdefault(method.signature_key, [])
             existing = {_summary_key(summary) for summary in current}
             for summary in _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
                 key = _summary_key(summary)
@@ -166,7 +166,7 @@ def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
         sink_line = callee_summary["sink_line"] if callee_summary else sink_node.start_point[0] + 1
         summary = {
             "method_node": method.node,
-            "method_key": method.key,
+            "method_key": method.signature_key,
             "method_name": method.method_name,
             "method_label": method.key,
             "filepath": method.filepath,
@@ -213,10 +213,10 @@ def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
 
     def inspect_summary_call(node):
         callee = project_index.resolve_invocation(method, node, local_types)
-        if not callee or callee.key == method.key:
+        if not callee or callee.signature_key == method.signature_key:
             return
         args = _argument_expressions(node.child_by_field_name("arguments"))
-        for callee_summary in summaries_by_key.get(callee.key, []):
+        for callee_summary in summaries_by_key.get(callee.signature_key, []):
             source_params = set()
             for callee_param in callee_summary["source_params"]:
                 try:
@@ -563,7 +563,10 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
         caller_info = None
         local_types = {}
         if project_index:
-            caller_info = project_index.methods_by_key.get(method_label(caller_method))
+            caller_info = project_index.resolve_method(
+                method_label(caller_method),
+                arity=len(collect_parameter_names(caller_method)),
+            )
             if caller_info:
                 local_types = project_index.variable_types_for(caller_info)
 
@@ -613,10 +616,10 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
             resolved_callee_key = callee_name
             if caller_info and project_summaries_by_key is not None:
                 callee_info = project_index.resolve_invocation(caller_info, node, local_types)
-                if not callee_info or callee_info.key == caller_info.key:
+                if not callee_info or callee_info.signature_key == caller_info.signature_key:
                     return
-                summaries = project_summaries_by_key.get(callee_info.key, [])
-                resolved_callee_key = callee_info.key
+                summaries = project_summaries_by_key.get(callee_info.signature_key, [])
+                resolved_callee_key = callee_info.signature_key
                 callee_name = callee_info.method_name
             else:
                 summaries = method_summaries.get(callee_name, [])

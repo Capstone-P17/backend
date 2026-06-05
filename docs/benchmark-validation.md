@@ -76,6 +76,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 - Hardcoded Secret: Juliet CWE259 01번의 `data = "..." -> DriverManager.getConnection(..., data)` assignment 흐름을 탐지하도록 개선했다.
 - Official manifest: OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 기반 회귀 테스트 manifest를 12개에서 31개로 확장했다.
 - SQL Injection: 프로젝트 단위 method index와 필드/지역 변수 타입 추론을 사용해 `Controller -> Service -> DAO`처럼 클래스/파일 경계를 넘는 SQL Injection 흐름을 탐지하도록 개선했다.
+- SQL Injection: 같은 이름의 메서드가 여러 개 있을 때 인자 개수로 overload를 구분해 잘못된 method summary가 섞이지 않도록 개선했다.
 - SQL Injection: 같은 파일 안에서 caller의 오염된 인자가 callee 파라미터로 전달되고, callee 내부 SQL 생성/실행 sink까지 이어지는 1단계 inter-procedural 흐름을 탐지하도록 개선했다.
 - SQL Injection: SQL 키워드 판정을 전체 AST 텍스트가 아니라 문자열 리터럴 기준으로 좁혀 주석, 로그 메시지, `selected` 같은 일반 단어로 인한 오탐 가능성을 줄였다.
 - Repository analysis guardrail: ZIP slip, 절대 경로, symlink, 과도한 Java 파일 수/파일 크기 입력을 분석 전에 차단한다.

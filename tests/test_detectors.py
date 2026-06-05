@@ -815,6 +815,11 @@ public class UserController {
         String id = req.getParameter("id");
         return userService.findUserSafely(id, conn);
     }
+
+    public ResultSet overloadedSafeSearch(HttpServletRequest req, Connection conn) throws Exception {
+        String id = req.getParameter("id");
+        return userService.findUser(id);
+    }
 }
 """.strip(),
         encoding="utf-8",
@@ -828,6 +833,10 @@ public class UserService {
 
     public ResultSet findUser(String id, Statement stmt) throws Exception {
         return dao.findById(id, stmt);
+    }
+
+    public ResultSet findUser(String id) throws Exception {
+        return dao.findStatic();
     }
 
     public ResultSet findUserSafely(String id, Connection conn) throws Exception {
@@ -851,6 +860,12 @@ public class UserDao {
         PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
         ps.setString(1, id);
         return ps.executeQuery();
+    }
+
+    public ResultSet findStatic() throws Exception {
+        Statement stmt = null;
+        String query = "SELECT * FROM users";
+        return stmt.executeQuery(query);
     }
 }
 """.strip(),
@@ -877,3 +892,4 @@ public class UserDao {
     assert "stmt.executeQuery" in controller_findings[0]["call_chain"][-1]
     assert "findUser(...)" in controller_findings[0]["evidence"]
     assert not any(finding["function"] == "safeSearch" for finding in findings)
+    assert not any(finding["function"] == "overloadedSafeSearch" for finding in findings)
