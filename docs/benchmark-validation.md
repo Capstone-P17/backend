@@ -72,6 +72,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 
 - Spring MVC source: `@RequestParam`, `@PathVariable`, `@RequestHeader`, `@CookieValue`, `@RequestBody`, `@ModelAttribute`가 붙은 메서드 파라미터를 사용자 입력 source로 인식해 SQL Injection, XSS, Path Traversal 흐름에 연결하도록 개선했다.
 - Spring MVC DTO source: `@RequestBody request`에서 파생되는 `request.getX()` getter와 `request.field` 필드 접근을 source 객체 기반 taint 흐름으로 유지해 SQL Injection, XSS, Path Traversal, Command Injection에 연결하도록 개선했다.
+- SQL Injection framework sink: JPA/Hibernate `createQuery/createNativeQuery`, Spring `JdbcTemplate.query/update`, MyBatis annotation mapper의 `${...}` 문자열 치환을 SQL sink 모델에 추가했다. MyBatis `#{...}` 바인딩과 JPA `setParameter` 패턴은 안전 흐름으로 유지한다.
 - Command Injection: 프로젝트 단위 method index를 사용해 `Controller -> CommandExecutor -> Runtime.exec(...)`처럼 클래스/파일 경계를 넘는 명령 실행 흐름을 탐지하도록 개선했다.
 - Command Injection: OWASP BenchmarkTest00006의 `request.getHeader(...) -> param -> argList.add(...) -> ProcessBuilder.command(argList)` 흐름을 탐지하도록 개선했다.
 - File Upload: 프로젝트 단위 method index를 사용해 `Controller MultipartFile -> StorageService.save(file) -> transferTo/Files.copy`처럼 클래스/파일 경계를 넘는 업로드 저장 흐름을 탐지하도록 개선했다.

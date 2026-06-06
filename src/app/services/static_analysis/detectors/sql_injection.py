@@ -10,10 +10,10 @@ from src.app.services.static_analysis.parser import (
 )
 from src.app.services.static_analysis.rules import (
     HTTP_REQUEST_SOURCE_METHODS,
+    MYBATIS_ANNOTATION_SINKS,
     SQL_BUILDER_METHODS,
-    SQL_EXEC_METHODS,
     SQL_KEYWORDS,
-    SQL_PREPARE_METHODS,
+    SQL_SINK_METHODS,
 )
 from src.app.services.static_analysis.taint_summary import (
     argument_expressions as _argument_expressions,
@@ -25,8 +25,8 @@ from src.app.services.static_analysis.taint_summary import (
     unique_summaries,
 )
 
-SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS
 SQL_KEYWORD_PATTERN = re.compile(r"\b(?:" + "|".join(SQL_KEYWORDS) + r")\b", re.IGNORECASE)
+MYBATIS_UNSAFE_SUBSTITUTION_PATTERN = re.compile(r"\$\{\s*[A-Za-z_][A-Za-z0-9_.$]*\s*\}")
 INPUT_METHODS = HTTP_REQUEST_SOURCE_METHODS
 SQL_LITERAL_NODE_TYPES = {"string_literal", "text_block"}
 
@@ -65,6 +65,31 @@ def _contains_sql_builder(node):
     return False
 
 
+def _mybatis_annotation_info(method_node):
+    method_text = _node_text(method_node)
+    if "${" not in method_text:
+        return None
+    for annotation in MYBATIS_ANNOTATION_SINKS:
+        if f"@{annotation}" not in method_text:
+            continue
+        if not SQL_KEYWORD_PATTERN.search(method_text):
+            continue
+        substitution = MYBATIS_UNSAFE_SUBSTITUTION_PATTERN.search(method_text)
+        if not substitution:
+            continue
+        return {
+            "annotation": f"@{annotation}",
+            "substitution": substitution.group(0),
+            "line": method_node.start_point[0] + 1,
+        }
+    return None
+
+
+def _mybatis_substitution_name(annotation_info):
+    substitution = annotation_info["substitution"].strip("${} ")
+    return substitution.split(".", 1)[0].strip()
+
+
 def _build_sink_name(node):
     name_node = node.child_by_field_name("name")
     object_node = node.child_by_field_name("object")
@@ -92,6 +117,28 @@ def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
     sql_vars = {}
     summaries = []
     local_types = project_index.variable_types_for(method)
+
+    mybatis_info = _mybatis_annotation_info(method.node)
+    if mybatis_info:
+        substitution_name = _mybatis_substitution_name(mybatis_info)
+        source_params = {substitution_name} if substitution_name in method.parameters else set(method.parameters)
+        if source_params:
+            summaries.append(
+                {
+                    "method_node": method.node,
+                    "method_key": method.signature_key,
+                    "method_name": method.method_name,
+                    "method_label": method.key,
+                    "filepath": method.filepath,
+                    "parameters": method.parameters,
+                    "source_params": sorted(source_params),
+                    "sink": f"{mybatis_info['annotation']} {mybatis_info['substitution']}",
+                    "sink_line": mybatis_info["line"],
+                    "sql_line": mybatis_info["line"],
+                    "sql_var": mybatis_info["substitution"],
+                    "chain": [method.key, f"MyBatis 문자열 치환 `{mybatis_info['substitution']}`"],
+                }
+            )
 
     def expression_source_params(node):
         refs = _referenced_vars(node, tainted_vars)
@@ -520,6 +567,57 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
                     }
                 )
 
+        def report_mybatis_annotation():
+            mybatis_info = _mybatis_annotation_info(method_node)
+            if not mybatis_info:
+                return
+            substitution_name = _mybatis_substitution_name(mybatis_info)
+            source_params = [substitution_name] if substitution_name in parameter_names else list(parameter_names)
+            if not source_params:
+                return
+
+            sink = f"{mybatis_info['annotation']} {mybatis_info['substitution']}"
+            vuln_counter[0] += 1
+            vulnerabilities.append(
+                {
+                    "id": f"VULN-{vuln_counter[0]:03d}",
+                    "type": "SQL_INJECTION",
+                    "file": filepath,
+                    "line": mybatis_info["line"],
+                    "function": method_declaration_name(method_node),
+                    "code_snippet": method_node.text.decode().strip(),
+                    "call_chain": [
+                        method_label(method_node),
+                        f"MyBatis annotation → {mybatis_info['substitution']}",
+                    ],
+                    "evidence": (
+                        f"MyBatis mapper `{method_label(method_node)}`에서 `{mybatis_info['annotation']}` 쿼리에 "
+                        f"문자열 치환 `{mybatis_info['substitution']}`가 사용되었습니다. "
+                        f"`{', '.join(source_params)}` 파라미터가 `#{{...}}` 바인딩이 아니라 `${{...}}` 형태로 SQL에 직접 치환되면 "
+                        "쿼리 구조가 변경될 수 있습니다."
+                    ),
+                    "confidence_reason": (
+                        f"MyBatis annotation 쿼리에서 `${{...}}` 문자열 치환과 SQL 키워드가 함께 확인되었고, "
+                        f"치환 대상 `{mybatis_info['substitution']}`가 mapper 파라미터와 연결되어 HIGH로 판단했습니다."
+                    ),
+                    "description": "",
+                }
+            )
+            summaries.append(
+                {
+                    "method_node": method_node,
+                    "method_name": method_declaration_name(method_node),
+                    "method_label": method_label(method_node),
+                    "parameters": parameter_names,
+                    "source_params": source_params,
+                    "sink": sink,
+                    "sink_line": mybatis_info["line"],
+                    "sql_line": mybatis_info["line"],
+                    "sql_var": mybatis_info["substitution"],
+                }
+            )
+
+        report_mybatis_annotation()
         visit_method_nodes()
         current_method_name = method_declaration_name(method_node)
         if current_method_name and summaries:

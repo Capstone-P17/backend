@@ -26,9 +26,26 @@ SPRING_MVC_SOURCE_ANNOTATIONS = (
 
 SQL_EXEC_METHODS = ("executeQuery", "executeUpdate", "execute", "executeLargeUpdate", "executeBatch")
 SQL_PREPARE_METHODS = ("prepareStatement",)
-SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS
-SQL_KEYWORDS = ("SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "MERGE", "ALTER", "TRUNCATE")
+SQL_ORM_QUERY_METHODS = (
+    "createQuery",
+    "createNativeQuery",
+    "createSQLQuery",
+    "createMutationQuery",
+    "newQuery",
+)
+SQL_TEMPLATE_METHODS = (
+    "query",
+    "queryForObject",
+    "queryForList",
+    "queryForMap",
+    "queryForRowSet",
+    "update",
+    "batchUpdate",
+)
+SQL_SINK_METHODS = SQL_EXEC_METHODS + SQL_PREPARE_METHODS + SQL_ORM_QUERY_METHODS + SQL_TEMPLATE_METHODS
+SQL_KEYWORDS = ("SELECT", "INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "MERGE", "ALTER", "TRUNCATE", "FROM", "WHERE")
 SQL_BUILDER_METHODS = ("format", "formatted", "concat")
+MYBATIS_ANNOTATION_SINKS = ("Select", "Insert", "Update", "Delete", "SelectProvider", "InsertProvider", "UpdateProvider", "DeleteProvider")
 
 XSS_OUTPUT_METHODS = ("println", "print", "write", "append", "format")
 XSS_HTML_FRAGMENTS = ("<", ">", "</", "/>", "<h1", "<div", "<span", "<p", "<script", "<img", "<a ")

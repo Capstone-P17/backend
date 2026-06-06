@@ -401,6 +401,87 @@ class SearchRequest {
     assert "request.getCommand()" in findings_by_type["COMMAND_INJECTION"]["evidence"]
 
 
+def test_sql_detector_tracks_jpa_hibernate_and_jdbctemplate_sinks(tmp_path: Path) -> None:
+    sample = tmp_path / "SpringSqlFrameworkController.java"
+    sample.write_text(
+        """
+import java.util.*;
+import javax.persistence.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.*;
+
+public class SpringSqlFrameworkController {
+    private final EntityManager entityManager;
+    private final JdbcTemplate jdbcTemplate;
+
+    public SpringSqlFrameworkController(EntityManager entityManager, JdbcTemplate jdbcTemplate) {
+        this.entityManager = entityManager;
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public List<?> unsafeJpa(@RequestParam String name) {
+        return entityManager.createQuery("from User u where u.name = '" + name + "'").getResultList();
+    }
+
+    public List<?> safeJpa(@RequestParam String name) {
+        Query query = entityManager.createQuery("from User u where u.name = :name");
+        query.setParameter("name", name);
+        return query.getResultList();
+    }
+
+    public List<?> unsafeJdbcTemplate(@RequestParam String keyword) {
+        String sql = "SELECT * FROM users WHERE name LIKE '%" + keyword + "%'";
+        return jdbcTemplate.queryForList(sql);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeJpa", "unsafeJdbcTemplate"]
+    assert "createQuery" in findings[0]["code_snippet"]
+    assert "queryForList" in findings[1]["call_chain"][-1]
+    assert not any(finding["function"] == "safeJpa" for finding in findings)
+
+
+def test_sql_detector_tracks_mybatis_annotation_dollar_substitution(tmp_path: Path) -> None:
+    sample = tmp_path / "UserMapper.java"
+    sample.write_text(
+        """
+import java.util.*;
+import org.apache.ibatis.annotations.*;
+
+public interface UserMapper {
+    @Select("SELECT * FROM users WHERE name LIKE '%${keyword}%'")
+    List<Object> unsafeSearch(String keyword);
+
+    @Select("SELECT * FROM users WHERE name LIKE CONCAT('%', #{keyword}, '%')")
+    List<Object> safeSearch(String keyword);
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeSearch"]
+    assert "${keyword}" in findings[0]["evidence"]
+    assert "#{...}" in findings[0]["evidence"]
+    assert not any(finding["function"] == "safeSearch" for finding in findings)
+
+
 def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
     sample = tmp_path / "UploadController.java"
     sample.write_text(
