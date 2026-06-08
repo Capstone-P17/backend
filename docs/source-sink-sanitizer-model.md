@@ -16,7 +16,7 @@ HTTP 요청 입력과 Spring MVC 바인딩 파라미터를 주요 외부 입력�
 
 | 취약점 | Source | Sink | Sanitizer / 안전 패턴 |
 |---|---|---|---|
-| SQL Injection | HTTP/Spring 입력 | `executeQuery`, `executeUpdate`, `execute`, `prepareStatement`, `createQuery`, `createNativeQuery`, `JdbcTemplate.query/update`, MyBatis `${...}` annotation mapper | 바인딩 파라미터를 사용하는 `PreparedStatement`, JPA/Hibernate `setParameter`, MyBatis `#{...}` |
+| SQL Injection | HTTP/Spring 입력 | `executeQuery`, `executeUpdate`, `execute`, `prepareStatement`, `createQuery`, `createNativeQuery`, `JdbcTemplate.query/update`, MyBatis annotation/XML mapper `${...}` | 바인딩 파라미터를 사용하는 `PreparedStatement`, JPA/Hibernate `setParameter`, MyBatis `#{...}` |
 | XSS | HTTP/Spring 입력 | `print`, `println`, `write`, `append`, `format` 등 HTML 응답 출력 | `escapeHtml4`, `htmlEscape`, `encodeForHTML`, `sanitize` 등 출력 컨텍스트 이스케이프 |
 | Path Traversal | HTTP/Spring 입력 | `File`, `FileInputStream`, `Paths.get`, `Path.of` 등 경로 생성/파일 접근 | `normalize`, `toRealPath`, `startsWith(base)` 기반 기준 디렉터리 검증 |
 | Command Injection | HTTP/Spring 입력 | `Runtime.exec`, `ProcessBuilder.command`, `new ProcessBuilder` | 고정 명령어 allowlist, 인자 분리, 쉘 메타문자 차단 |
@@ -28,7 +28,7 @@ HTTP 요청 입력과 Spring MVC 바인딩 파라미터를 주요 외부 입력�
 
 - Source/Sink/Sanitizer 목록은 정적 규칙이므로 프레임워크별 커스텀 wrapper는 추가 모델링이 필요합니다.
 - DTO getter/field 접근은 source 객체 기준으로 추적하지만, nested object graph 전체에 대한 정밀 points-to analysis는 아직 제한적입니다.
-- MyBatis XML mapper 파일의 `${...}` 분석은 아직 포함하지 않았고, Java annotation mapper의 `${...}` 문자열 치환을 우선 탐지합니다.
+- MyBatis XML mapper는 `select/insert/update/delete` statement 내부의 `${...}`와 iBATIS식 `$name$` 문자열 치환을 탐지합니다. 동적 SQL의 모든 분기 조건을 정밀 해석하지는 않습니다.
 - Sanitizer가 존재하더라도 출력/SQL/경로 등 실제 컨텍스트에 맞는지까지 완전 검증하지는 않습니다.
 - 파일/클래스 간 흐름은 method summary와 project index를 통해 일부 추적하지만, CodeQL/Sparrow 수준의 완전한 points-to/type analysis는 아닙니다.
 

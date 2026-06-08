@@ -482,6 +482,56 @@ public interface UserMapper {
     assert not any(finding["function"] == "safeSearch" for finding in findings)
 
 
+def test_sql_detector_tracks_mybatis_xml_dollar_substitution(tmp_path: Path) -> None:
+    mapper = tmp_path / "UserMapper.xml"
+    java_file = tmp_path / "UserMapper.java"
+    java_file.write_text(
+        """
+public interface UserMapper {
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    mapper.write_text(
+        """
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+  "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="UserMapper">
+  <select id="unsafeSearch" parameterType="map" resultType="User">
+    SELECT * FROM users WHERE name LIKE '%${keyword}%'
+  </select>
+
+  <select id="safeSearch" parameterType="map" resultType="User">
+    SELECT * FROM users WHERE name LIKE CONCAT('%', #{keyword}, '%')
+  </select>
+
+  <!--
+  <select id="commentedUnsafe">
+    SELECT * FROM users WHERE name = '${ignored}'
+  </select>
+  -->
+</mapper>
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    assert result["analysis_result"]["files_analyzed"] == 2
+    assert [finding["function"] for finding in findings] == ["unsafeSearch"]
+    finding = findings[0]
+    assert finding["file"] == "UserMapper.xml"
+    assert "${keyword}" in finding["evidence"]
+    assert "#{...}" in finding["evidence"]
+    assert "commentedUnsafe" not in finding["evidence"]
+
+
 def test_file_upload_detector_requires_allowlist_before_storage(tmp_path: Path) -> None:
     sample = tmp_path / "UploadController.java"
     sample.write_text(

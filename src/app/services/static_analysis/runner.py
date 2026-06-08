@@ -10,6 +10,10 @@ from src.app.services.static_analysis.call_graph import build_call_graph
 from src.app.services.static_analysis.detectors.command_injection import detect_command_injection
 from src.app.services.static_analysis.detectors.file_upload import detect_dangerous_file_upload
 from src.app.services.static_analysis.detectors.insecure_random import detect_insecure_random
+from src.app.services.static_analysis.detectors.mybatis_xml import (
+    detect_mybatis_xml_sql_injection,
+    is_mybatis_mapper_xml,
+)
 from src.app.services.static_analysis.detectors.path_traversal import detect_path_traversal
 from src.app.services.static_analysis.detectors.secrets import detect_hardcoded_secrets
 from src.app.services.static_analysis.detectors.sql_injection import detect_sql_injection
@@ -25,6 +29,9 @@ _MAX_CONTEXT_LINES = (_CONTEXT_RADIUS * 2) + 1
 
 def analyze_file(filepath):
     logger.bind(component="static.runner", file=filepath).info("file_analysis_started file={}", filepath)
+    if filepath.lower().endswith(".xml"):
+        return _analyze_xml_file(filepath)
+
     tree, code = parse_file(filepath)
     vuln_counter = [0]
 
@@ -67,16 +74,29 @@ def analyze_directory(directory, repository=""):
     all_call_graph = {}
     analyzed_files = []
     parsed_files = []
+    xml_files = []
     vuln_counter = [0]
 
     for root, _, files in os.walk(directory):
         for filename in files:
-            if not filename.endswith(".java"):
-                continue
-
             filepath = os.path.join(root, filename)
-            analyzed_files.append(filepath)
-            parsed_files.append((filepath, *parse_file(filepath)))
+            lowered_filename = filename.lower()
+            if lowered_filename.endswith(".java"):
+                analyzed_files.append(filepath)
+                parsed_files.append((filepath, *parse_file(filepath)))
+                continue
+            if lowered_filename.endswith(".xml"):
+                try:
+                    xml_code = _read_text_file(filepath)
+                except UnicodeDecodeError:
+                    logger.bind(component="static.runner", file=filepath).debug(
+                        "xml_file_skipped_non_utf8 file={}",
+                        filepath,
+                    )
+                    continue
+                if is_mybatis_mapper_xml(xml_code):
+                    analyzed_files.append(filepath)
+                    xml_files.append((filepath, xml_code))
 
     project_index = build_project_index(parsed_files)
 
@@ -96,6 +116,17 @@ def analyze_directory(directory, repository=""):
         all_call_graph.update(build_call_graph(tree))
         logger.bind(component="static.runner", file=filepath).debug(
             "java_file_analysis_finished file={} findings={}",
+            filepath,
+            len(file_vulnerabilities),
+        )
+
+    for filepath, code in xml_files:
+        logger.bind(component="static.runner", file=filepath).debug("xml_file_analysis_started file={}", filepath)
+        file_vulnerabilities = detect_mybatis_xml_sql_injection(filepath, code, vuln_counter)
+        _attach_code_context(file_vulnerabilities, code)
+        all_vulnerabilities += file_vulnerabilities
+        logger.bind(component="static.runner", file=filepath).debug(
+            "xml_file_analysis_finished file={} findings={}",
             filepath,
             len(file_vulnerabilities),
         )
@@ -132,6 +163,34 @@ def _attach_code_context(vulnerabilities, source_code: str) -> None:
         if context:
             vulnerability["code_snippet"] = context
         _attach_call_chain_details(vulnerability, source_code)
+
+
+def _analyze_xml_file(filepath: str) -> dict:
+    code = _read_text_file(filepath)
+    vuln_counter = [0]
+    vulnerabilities = detect_mybatis_xml_sql_injection(filepath, code, vuln_counter)
+    _attach_code_context(vulnerabilities, code)
+    logger.bind(component="static.runner", file=filepath).info(
+        "file_analysis_finished file={} findings={}",
+        filepath,
+        len(vulnerabilities),
+    )
+    return {
+        "analysis_result": {
+            "repository": "",
+            "analyzed_at": datetime.now().isoformat(),
+            "language": "java",
+            "files_analyzed": 1 if is_mybatis_mapper_xml(code) else 0,
+            "vulnerabilities": vulnerabilities,
+            "call_graph": {},
+            "summary": build_summary(vulnerabilities, [filepath] if is_mybatis_mapper_xml(code) else []),
+        }
+    }
+
+
+def _read_text_file(filepath: str) -> str:
+    with open(filepath, encoding="utf-8") as source_file:
+        return source_file.read()
 
 
 def _attach_call_chain_details(vulnerability, source_code: str) -> None:
