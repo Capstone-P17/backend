@@ -44,12 +44,12 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 | XSS | OWASP BenchmarkJava, Juliet | TP 확인 | 분기 내부 `getParameter` 할당 후 후속 HTML 출력 sink로 전달되는 흐름, HTML 응답에서 header 값이 `format()` 출력으로 전달되는 흐름, Controller 입력이 Renderer/Service 구현체를 거쳐 HTML 반환값으로 출력되는 클래스/파일 경계 흐름을 탐지한다. Spring MVC annotation 파라미터를 입력 source로 반영한다. |
 | Hardcoded Secret | Juliet | TP 확인 | generic 변수명 `data`에 문자열 리터럴이 할당된 뒤 `DriverManager.getConnection(..., data)` 비밀번호 인자로 사용되는 흐름을 탐지한다. |
 
-현재 manifest는 공식 샘플 31개를 포함한다. 기준 결과는 다음과 같다.
+현재 manifest는 공식 샘플 61개를 포함한다. OWASP BenchmarkJava 케이스는 `expectedresults-1.2.csv`의 ground truth를 기준으로 선별했고, Juliet 케이스는 CWE별 공식 테스트 케이스 구조를 기준으로 선별했다. 기준 결과는 다음과 같다.
 
 | 결과 | 케이스 수 | 설명 |
 |---|---:|---|
-| TP | 16 | 공식 ground truth가 취약이고 현재 detector가 탐지한다. |
-| TN | 15 | 공식 ground truth가 비취약이고 현재 detector가 탐지하지 않는다. |
+| TP | 34 | 공식 ground truth가 취약이고 현재 detector가 탐지한다. |
+| TN | 27 | 공식 ground truth가 비취약이고 현재 detector가 탐지하지 않는다. |
 | known FN | 0 | 현재 manifest 기준으로 의도적으로 남긴 known false negative는 없다. |
 | FP | 0 | 현재 manifest에는 의도된 FP가 없다. |
 
@@ -63,7 +63,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 ## 발표/로딩 화면에 쓸 수 있는 문구
 
 ```text
-공식 OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 샘플 31개를 기준으로 회귀 테스트를 수행했습니다.
+공식 OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 샘플 61개를 기준으로 회귀 테스트를 수행했습니다.
 현재 SQL Injection, XSS, Weak Hash, Insecure Random, Command Injection, Path Traversal, Hardcoded Secret 일부 패턴은 공식 샘플에서 탐지 가능하며,
 현재 manifest 기준으로 의도적으로 남긴 known false negative는 없습니다.
 ```
@@ -84,7 +84,7 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 - XSS: 프로젝트 단위 method index를 사용해 `Controller -> Renderer/Service 구현체 -> HTML 반환값 -> response.write(...)`처럼 클래스/파일 경계를 넘는 출력 흐름을 탐지하도록 개선했다.
 - XSS: OWASP BenchmarkTest00013의 `request.getHeaders(...) -> param -> response.getWriter().format(...)` 흐름과 Juliet CWE83 14번의 branch assignment 후 HTML 출력 흐름을 탐지하도록 개선했다.
 - Hardcoded Secret: Juliet CWE259 01번의 `data = "..." -> DriverManager.getConnection(..., data)` assignment 흐름을 탐지하도록 개선했다.
-- Official manifest: OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 기반 회귀 테스트 manifest를 12개에서 31개로 확장했다.
+- Official manifest: OWASP BenchmarkJava와 NIST SARD Juliet Java 1.3 기반 회귀 테스트 manifest를 31개에서 61개로 확장했다. SQL Injection, XSS, Path Traversal, Command Injection, Weak Hash, Insecure Random, Hardcoded Secret의 추가 TP/TN 케이스를 포함한다.
 - SQL Injection: 프로젝트 단위 method index와 필드/지역 변수 타입 추론을 사용해 `Controller -> Service -> DAO`처럼 클래스/파일 경계를 넘는 SQL Injection 흐름을 탐지하도록 개선했다.
 - SQL Injection: interface 타입 필드가 유일한 `implements` 구현체로 연결되는 경우 구현체 메서드 summary를 사용해 파일 간 taint 흐름을 이어가도록 개선했다.
 - SQL Injection: Spring 생성자 주입 형태의 `this.field = parameter` 대입과 `this.userService.findUser(...)` 필드 호출을 타입 해석에 반영하도록 개선했다.

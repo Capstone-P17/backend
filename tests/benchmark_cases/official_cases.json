@@ -308,5 +308,305 @@
     "ground_truth_vulnerable": false,
     "expected_detected": false,
     "notes": "Additional OWASP command injection true-negative sample with safe collection-derived command content."
+  },
+  {
+    "id": "owasp_sqli_bad_00033",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00033.java",
+    "vulnerability_type": "SQL_INJECTION",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP SQL injection true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_sqli_bad_00034",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00034.java",
+    "vulnerability_type": "SQL_INJECTION",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP SQL injection true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_sqli_safe_00105",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00105.java",
+    "vulnerability_type": "SQL_INJECTION",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP SQL injection true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_sqli_safe_00107",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00107.java",
+    "vulnerability_type": "SQL_INJECTION",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP SQL injection true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_xss_bad_00047",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00047.java",
+    "vulnerability_type": "XSS",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP XSS true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_xss_bad_00146",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00146.java",
+    "vulnerability_type": "XSS",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP XSS true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_xss_safe_00277",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00277.java",
+    "vulnerability_type": "XSS",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP XSS true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_xss_safe_00278",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00278.java",
+    "vulnerability_type": "XSS",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP XSS true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_path_bad_00011",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00011.java",
+    "vulnerability_type": "PATH_TRAVERSAL",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP path traversal true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_path_bad_00060",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00060.java",
+    "vulnerability_type": "PATH_TRAVERSAL",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP path traversal true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_path_safe_00135",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00135.java",
+    "vulnerability_type": "PATH_TRAVERSAL",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP path traversal true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_path_safe_00136",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00136.java",
+    "vulnerability_type": "PATH_TRAVERSAL",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP path traversal true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_cmdi_bad_00015",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00015.java",
+    "vulnerability_type": "COMMAND_INJECTION",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP command injection true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_cmdi_bad_00293",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00293.java",
+    "vulnerability_type": "COMMAND_INJECTION",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP command injection true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_cmdi_safe_00171",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00171.java",
+    "vulnerability_type": "COMMAND_INJECTION",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP command injection true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_cmdi_safe_00175",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00175.java",
+    "vulnerability_type": "COMMAND_INJECTION",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP command injection true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_hash_bad_00071",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00071.java",
+    "vulnerability_type": "WEAK_HASH",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP weak hash true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_hash_bad_00073",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00073.java",
+    "vulnerability_type": "WEAK_HASH",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "OWASP weak hash true-positive sample selected from expectedresults-1.2.csv."
+  },
+  {
+    "id": "owasp_hash_safe_00069",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00069.java",
+    "vulnerability_type": "WEAK_HASH",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP weak hash true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_hash_safe_00072",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00072.java",
+    "vulnerability_type": "WEAK_HASH",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP weak hash true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_weakrand_safe_00094",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00094.java",
+    "vulnerability_type": "INSECURE_RANDOM",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP weak random true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "owasp_weakrand_safe_00095",
+    "source": "OWASP BenchmarkJava",
+    "source_url": "https://github.com/OWASP-Benchmark/BenchmarkJava",
+    "relative_path": "OWASP-BenchmarkJava/src/main/java/org/owasp/benchmark/testcode/BenchmarkTest00095.java",
+    "vulnerability_type": "INSECURE_RANDOM",
+    "ground_truth_vulnerable": false,
+    "expected_detected": false,
+    "notes": "OWASP weak random true-negative sample selected to guard against false positives."
+  },
+  {
+    "id": "juliet_hardcoded_password_driver_17",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE259_Hard_Coded_Password/CWE259_Hard_Coded_Password__driverManager_17.java",
+    "vulnerability_type": "HARDCODED_SECRET",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet hardcoded password variant with DriverManager password usage."
+  },
+  {
+    "id": "juliet_hardcoded_password_driver_31",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE259_Hard_Coded_Password/CWE259_Hard_Coded_Password__driverManager_31.java",
+    "vulnerability_type": "HARDCODED_SECRET",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet hardcoded password variant with DriverManager password usage."
+  },
+  {
+    "id": "juliet_weak_hash_md5_01",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE328_Reversible_One_Way_Hash/CWE328_Reversible_One_Way_Hash__MD5_01.java",
+    "vulnerability_type": "WEAK_HASH",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet MD5 weak hash sample should be reported as WEAK_HASH."
+  },
+  {
+    "id": "juliet_weak_hash_sha1_01",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE328_Reversible_One_Way_Hash/CWE328_Reversible_One_Way_Hash__SHA1_01.java",
+    "vulnerability_type": "WEAK_HASH",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet SHA-1 weak hash sample should be reported as WEAK_HASH."
+  },
+  {
+    "id": "juliet_weak_prng_util_03",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE338_Weak_PRNG/CWE338_Weak_PRNG__util_03.java",
+    "vulnerability_type": "INSECURE_RANDOM",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet weak PRNG sample using java.util.Random should be reported as INSECURE_RANDOM."
+  },
+  {
+    "id": "juliet_weak_prng_util_04",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE338_Weak_PRNG/CWE338_Weak_PRNG__util_04.java",
+    "vulnerability_type": "INSECURE_RANDOM",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet weak PRNG sample using java.util.Random should be reported as INSECURE_RANDOM."
+  },
+  {
+    "id": "juliet_xss_getparameter_01",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE83_XSS_Attribute/CWE83_XSS_Attribute__Servlet_getParameter_Servlet_01.java",
+    "vulnerability_type": "XSS",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet getParameter XSS sample should be reported as XSS."
+  },
+  {
+    "id": "juliet_xss_getparameter_02",
+    "source": "NIST SARD Juliet Java 1.3",
+    "source_url": "https://samate.nist.gov/SARD/test-suites/111",
+    "relative_path": "Juliet-Java-1.3/Java/src/testcases/CWE83_XSS_Attribute/CWE83_XSS_Attribute__Servlet_getParameter_Servlet_02.java",
+    "vulnerability_type": "XSS",
+    "ground_truth_vulnerable": true,
+    "expected_detected": true,
+    "notes": "Juliet getParameter XSS sample should be reported as XSS."
   }
 ]
