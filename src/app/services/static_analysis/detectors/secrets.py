@@ -5,52 +5,18 @@ import re
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
-
-SECRET_KEYWORDS = ["password", "passwd", "secret", "api_key", "apikey", "token", "credential", "key"]
-PLACEHOLDER_VALUES = {
-    "changeme",
-    "change-me",
-    "change_me",
-    "example",
-    "sample",
-    "placeholder",
-    "dummy",
-    "todo",
-    "fixme",
-    "test",
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "apikey",
-    "api_key",
-    "your-secret-here",
-    "your-api-key",
-}
-VALUE_PATTERNS = (
-    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
-    re.compile(r"\bghp_[A-Za-z0-9_]{20,}\b"),
-    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
-    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+from src.app.services.static_analysis.rules import (
+    SECRET_KEYWORDS,
+    SECRET_PLACEHOLDER_VALUES,
+    SECRET_USAGE_CLASS_NAMES,
+    SECRET_USAGE_METHODS,
+    SECRET_VALUE_PATTERN_STRINGS,
 )
-SECRET_USAGE_METHODS = {
-    "connect",
-    "getConnection",
-    "login",
-    "authenticate",
-    "authorize",
-    "sign",
-    "verify",
-    "setPassword",
-    "setToken",
-    "setApiKey",
-    "setSecret",
-}
-SECRET_USAGE_CLASS_NAMES = {
-    "PasswordAuthentication",
-    "UsernamePasswordAuthenticationToken",
-}
+
+PLACEHOLDER_VALUES = set(SECRET_PLACEHOLDER_VALUES)
+VALUE_PATTERNS = tuple(re.compile(pattern) for pattern in SECRET_VALUE_PATTERN_STRINGS)
+SECRET_USAGE_METHOD_SET = set(SECRET_USAGE_METHODS)
+SECRET_USAGE_CLASS_NAME_SET = set(SECRET_USAGE_CLASS_NAMES)
 
 
 def _text(node):
@@ -127,11 +93,11 @@ def _object_creation_class_name(node):
 
 def _is_relevant_secret_usage(node):
     method_name = _usage_method_name(node)
-    if method_name and method_name in SECRET_USAGE_METHODS:
+    if method_name and method_name in SECRET_USAGE_METHOD_SET:
         return True
 
     class_name = _object_creation_class_name(node)
-    return class_name in SECRET_USAGE_CLASS_NAMES
+    return class_name in SECRET_USAGE_CLASS_NAME_SET
 
 
 def _build_secret_chain(declaration_node, usage_node, origin_label="선언"):

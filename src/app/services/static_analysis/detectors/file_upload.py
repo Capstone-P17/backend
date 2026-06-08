@@ -6,6 +6,7 @@ from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
 from src.app.services.static_analysis.rules import (
     UPLOAD_FILENAME_METHODS,
+    UPLOAD_STORAGE_SINKS,
     UPLOAD_TYPES,
     UPLOAD_WEB_ROOT_TOKENS,
 )
@@ -15,6 +16,7 @@ from src.app.services.static_analysis.taint_summary import (
 )
 
 FILENAME_METHODS = UPLOAD_FILENAME_METHODS
+STORAGE_SINKS = UPLOAD_STORAGE_SINKS
 WEB_ROOT_TOKENS = UPLOAD_WEB_ROOT_TOKENS
 
 
@@ -86,11 +88,11 @@ def detect_dangerous_file_upload(filepath, tree, vuln_counter, project_index=Non
                 sinks.append((node, "Part.write(...)"))
                 continue
 
-            if method_name == "copy" and object_name == "Files" and _mentions_upload_stream(args_text, upload_vars):
+            if "Files.copy" in STORAGE_SINKS and method_name == "copy" and object_name == "Files" and _mentions_upload_stream(args_text, upload_vars):
                 sinks.append((node, "Files.copy(...)"))
                 continue
 
-            if method_name in {"copyInputStreamToFile", "copyToFile"} and _mentions_upload_var(node_text, upload_vars):
+            if method_name in STORAGE_SINKS and _mentions_upload_var(node_text, upload_vars):
                 sinks.append((node, f"{method_name}(...)"))
 
         return sinks

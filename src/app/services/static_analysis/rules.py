@@ -94,7 +94,7 @@ COMMAND_ALLOWLIST_CONTAINER_HINTS = (
 
 UPLOAD_TYPES = ("MultipartFile", "Part", "FileItem")
 UPLOAD_FILENAME_METHODS = ("getOriginalFilename", "getSubmittedFileName")
-UPLOAD_STORAGE_SINKS = ("transferTo", "Files.copy", "write")
+UPLOAD_STORAGE_SINKS = ("transferTo", "Files.copy", "write", "copyInputStreamToFile", "copyToFile")
 UPLOAD_WEB_ROOT_TOKENS = (
     "src/main/resources/static",
     "resources/static",
@@ -134,3 +134,49 @@ SECURITY_RANDOM_CONTEXT_KEYWORDS = (
     "csrf",
 )
 NON_SECURITY_RANDOM_CONTEXT_KEYWORDS = ("dice", "roll", "page", "game", "shuffle", "simulation", "sample", "pager")
+
+SECRET_KEYWORDS = ("password", "passwd", "secret", "api_key", "apikey", "token", "credential", "key")
+SECRET_PLACEHOLDER_VALUES = (
+    "changeme",
+    "change-me",
+    "change_me",
+    "example",
+    "sample",
+    "placeholder",
+    "dummy",
+    "todo",
+    "fixme",
+    "test",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "your-secret-here",
+    "your-api-key",
+)
+SECRET_VALUE_PATTERN_STRINGS = (
+    r"\bsk-[A-Za-z0-9_-]{20,}\b",
+    r"\bghp_[A-Za-z0-9_]{20,}\b",
+    r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
+    r"\bAKIA[A-Z0-9]{16}\b",
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+)
+SECRET_USAGE_METHODS = (
+    "connect",
+    "getConnection",
+    "login",
+    "authenticate",
+    "authorize",
+    "sign",
+    "verify",
+    "setPassword",
+    "setToken",
+    "setApiKey",
+    "setSecret",
+)
+SECRET_USAGE_CLASS_NAMES = (
+    "PasswordAuthentication",
+    "UsernamePasswordAuthenticationToken",
+)
