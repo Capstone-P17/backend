@@ -737,11 +737,12 @@ public class SecretFlowController {
         'private String dbPassword = "root1234!";',
     ]
     assert len(findings) == len(expected_declarations)
-    for finding, declaration in zip(findings, expected_declarations, strict=True):
-        assert declaration in finding["code_snippet"]
-        assert "|" in finding["code_snippet"]
+    found_snippets = "\n".join(str(finding.get("code_snippet") or "") for finding in findings)
+    for declaration in expected_declarations:
+        assert declaration in found_snippets
+    assert all("|" in str(finding.get("code_snippet") or "") for finding in findings)
 
-    db_password = findings[-1]
+    db_password = next(finding for finding in findings if "`dbPassword`" in finding["evidence"])
     assert db_password["call_chain"] == [
         "SecretFlowController.connect",
         "getConnection",
@@ -752,7 +753,7 @@ public class SecretFlowController {
     assert "`dbPassword`" in db_password["evidence"]
     assert "getConnection" in db_password["evidence"]
 
-    declarations_without_usage = findings[:3]
+    declarations_without_usage = [finding for finding in findings if finding is not db_password]
     assert all("사용처 확인 안 됨" in finding["call_chain"] for finding in declarations_without_usage)
     assert all("사용 여부와 무관하게" in finding["evidence"] or "현재 분석 범위에서 민감 호출 사용처는 확인되지 않았습니다" in finding["evidence"] for finding in declarations_without_usage)
     assert not any("injectedPassword" in finding["code_snippet"] for finding in findings)
@@ -1438,7 +1439,7 @@ public class SqlInterproceduralController {
         if finding["function"] == "route" and "inter-procedural" in finding["confidence_reason"]
     ]
 
-    assert [finding["function"] for finding in findings] == ["findById", "route"]
+    assert {finding["function"] for finding in findings} == {"findById", "route"}
     assert interprocedural
     assert "findById(...)" in interprocedural[0]["evidence"]
     assert "userId` → `id" in interprocedural[0]["evidence"]

@@ -21,6 +21,7 @@ from src.app.services.static_analysis.detectors.weak_hash import detect_weak_has
 from src.app.services.static_analysis.detectors.xss import detect_xss
 from src.app.services.static_analysis.parser import parse_file
 from src.app.services.static_analysis.project_index import build_project_index
+from src.app.services.static_analysis.result_ordering import prioritize_findings
 from src.app.services.static_analysis.scoring import build_summary
 
 _CONTEXT_RADIUS = 3
@@ -45,6 +46,7 @@ def analyze_file(filepath):
     vulnerabilities += detect_weak_hash(filepath, tree, vuln_counter)
     vulnerabilities += detect_dangerous_file_upload(filepath, tree, vuln_counter)
     _attach_code_context(vulnerabilities, code)
+    vulnerabilities = prioritize_findings(vulnerabilities)
     logger.bind(component="static.runner", file=filepath).info(
         "file_analysis_finished file={} findings={}",
         filepath,
@@ -131,6 +133,7 @@ def analyze_directory(directory, repository=""):
             len(file_vulnerabilities),
         )
 
+    all_vulnerabilities = prioritize_findings(all_vulnerabilities)
     logger.bind(component="static.runner", repository=repository or "-", directory=directory).info(
         "directory_analysis_finished directory={} files={} findings={}",
         directory,
@@ -170,6 +173,7 @@ def _analyze_xml_file(filepath: str) -> dict:
     vuln_counter = [0]
     vulnerabilities = detect_mybatis_xml_sql_injection(filepath, code, vuln_counter)
     _attach_code_context(vulnerabilities, code)
+    vulnerabilities = prioritize_findings(vulnerabilities)
     logger.bind(component="static.runner", file=filepath).info(
         "file_analysis_finished file={} findings={}",
         filepath,

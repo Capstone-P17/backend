@@ -115,6 +115,8 @@ class VulnerabilityFinding(BaseModel):
     finding_report_summary: str = ""
     finding_report_markdown_preview: str = ""
     finding_report: FindingMarkdownReport | None = None
+    duplicate_count: int = 1
+    related_finding_ids: list[str] = Field(default_factory=list)
 
 
 class SecurityScore(BaseModel):

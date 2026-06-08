@@ -18,6 +18,7 @@ from reportlab.platypus import CondPageBreak, KeepTogether, PageBreakIfNotEmpty,
 
 from src.app.core.config import Settings
 from src.app.services.analysis_service import AnalysisResultNotFoundError, AnalysisService
+from src.app.services.static_analysis.result_ordering import sort_findings
 
 _PDF_FONT_NAME = "HYGothic-Medium"
 _FINDING_STATUS_LABELS = {
@@ -685,19 +686,7 @@ class ReportService:
         return rows
 
     def _sort_findings_for_report(self, findings: Any) -> list[dict[str, Any]]:
-        if not isinstance(findings, list):
-            return []
-
-        normalized = [finding for finding in findings if isinstance(finding, dict)]
-
-        def sort_key(finding: dict[str, Any]) -> tuple[str, int, str]:
-            file_path = str(finding.get("file") or "")
-            line = finding.get("line")
-            line_number = line if isinstance(line, int) else 10**9
-            finding_type = str(finding.get("type") or "")
-            return (file_path, line_number, finding_type)
-
-        return sorted(normalized, key=sort_key)
+        return sort_findings(findings)
 
     def _build_guideline_summary_text(self, refs: list[Any]) -> str:
         formatted_refs: list[str] = []

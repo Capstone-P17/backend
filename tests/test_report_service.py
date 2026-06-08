@@ -344,10 +344,10 @@ def test_report_service_sorts_findings_like_analysis_ui() -> None:
 
     assert [finding["id"] for finding in ordered] == [
         "a-early-sql",
-        "a-early-xss",
         "a-late",
-        "z-file",
         "b-late",
+        "a-early-xss",
+        "z-file",
     ]
 
 
