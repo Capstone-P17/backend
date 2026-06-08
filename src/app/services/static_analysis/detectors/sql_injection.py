@@ -101,17 +101,136 @@ def _build_sink_name(node):
 
 
 def _get_project_sql_summaries(project_index):
+    return_summaries_by_key = _get_project_sql_return_summaries(project_index)
     return initialize_summary_cache(
         project_index,
         cache_attr="sql_summaries_by_key",
         collect_fn=lambda method, summaries_by_key: _collect_sql_summaries_for_method(
-            method, project_index, summaries_by_key
+            method, project_index, summaries_by_key, return_summaries_by_key
         ),
         key_fn=_summary_key,
     )
 
 
-def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
+def _get_project_sql_return_summaries(project_index):
+    return initialize_summary_cache(
+        project_index,
+        cache_attr="sql_return_summaries_by_key",
+        collect_fn=lambda method, summaries_by_key: _collect_sql_return_summaries_for_method(
+            method, project_index, summaries_by_key
+        ),
+        key_fn=_return_summary_key,
+    )
+
+
+def _return_expression(return_node):
+    value_node = return_node.child_by_field_name("value")
+    if value_node:
+        return value_node
+    return next((child for child in return_node.children if child.is_named), None)
+
+
+def _collect_sql_return_summaries_for_method(method, project_index, return_summaries_by_key):
+    tainted_vars = set(method.parameters)
+    param_sources = {param: {param} for param in method.parameters}
+    summaries = []
+    local_types = project_index.variable_types_for(method)
+
+    def project_return_source_params(invocation_node):
+        callee = project_index.resolve_invocation(method, invocation_node, local_types)
+        if not callee or callee.signature_key == method.signature_key:
+            return set(), callee is not None
+
+        args = _argument_expressions(invocation_node.child_by_field_name("arguments"))
+        source_params = set()
+        for return_summary in return_summaries_by_key.get(callee.signature_key, []):
+            for callee_param in return_summary["source_params"]:
+                try:
+                    index = return_summary["parameters"].index(callee_param)
+                except ValueError:
+                    continue
+                if index >= len(args):
+                    continue
+                source_params.update(expression_source_params(args[index]))
+        return source_params, True
+
+    def expression_source_params(node):
+        if node is None:
+            return set()
+
+        if node.type == "method_invocation":
+            source_params, handled = project_return_source_params(node)
+            if handled:
+                return source_params
+
+        refs = _referenced_vars(node, tainted_vars)
+        sources = set()
+        for ref in refs:
+            sources.update(param_sources.get(ref, set()))
+
+        for child in iterate_all(node):
+            if child is node or child.type != "method_invocation":
+                continue
+            child_sources, handled = project_return_source_params(child)
+            if handled:
+                sources.update(child_sources)
+        return sources
+
+    def update_variable(var_name, value_node):
+        source_params = expression_source_params(value_node)
+        if source_params:
+            tainted_vars.add(var_name)
+            param_sources[var_name] = set(source_params)
+        else:
+            tainted_vars.discard(var_name)
+            param_sources.pop(var_name, None)
+
+    stack = [method.node]
+    while stack:
+        node = stack.pop()
+        if node.type == "method_declaration" and node is not method.node:
+            continue
+
+        if node.type in ("local_variable_declaration", "field_declaration"):
+            for child in node.children:
+                if child.type != "variable_declarator":
+                    continue
+                name_node = child.child_by_field_name("name")
+                value_node = child.child_by_field_name("value")
+                if name_node and value_node:
+                    update_variable(_node_text(name_node), value_node)
+
+        if node.type == "assignment_expression":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if left and right and left.type == "identifier":
+                update_variable(_node_text(left), right)
+
+        if node.type == "return_statement":
+            value_node = _return_expression(node)
+            source_params = expression_source_params(value_node)
+            if source_params:
+                summaries.append(
+                    {
+                        "method_node": method.node,
+                        "method_key": method.signature_key,
+                        "method_name": method.method_name,
+                        "method_label": method.key,
+                        "filepath": method.filepath,
+                        "parameters": method.parameters,
+                        "source_params": sorted(source_params),
+                        "return_line": node.start_point[0] + 1,
+                        "return_expression": _node_text(value_node),
+                        "chain": [method.key, f"return `{_node_text(value_node)}`"],
+                    }
+                )
+
+        stack.extend(reversed(node.children))
+
+    return unique_summaries(summaries, _return_summary_key)
+
+
+def _collect_sql_summaries_for_method(method, project_index, summaries_by_key, return_summaries_by_key):
     tainted_vars = set(method.parameters)
     param_sources = {param: {param} for param in method.parameters}
     sql_vars = {}
@@ -140,11 +259,43 @@ def _collect_sql_summaries_for_method(method, project_index, summaries_by_key):
                 }
             )
 
+    def project_return_source_params(invocation_node):
+        callee = project_index.resolve_invocation(method, invocation_node, local_types)
+        if not callee or callee.signature_key == method.signature_key:
+            return set(), callee is not None
+
+        args = _argument_expressions(invocation_node.child_by_field_name("arguments"))
+        source_params = set()
+        for return_summary in return_summaries_by_key.get(callee.signature_key, []):
+            for callee_param in return_summary["source_params"]:
+                try:
+                    index = return_summary["parameters"].index(callee_param)
+                except ValueError:
+                    continue
+                if index >= len(args):
+                    continue
+                source_params.update(expression_source_params(args[index]))
+        return source_params, True
+
     def expression_source_params(node):
+        if node is None:
+            return set()
+
+        if node.type == "method_invocation":
+            source_params, handled = project_return_source_params(node)
+            if handled:
+                return source_params
+
         refs = _referenced_vars(node, tainted_vars)
         sources = set()
         for ref in refs:
             sources.update(param_sources.get(ref, set()))
+        for child in iterate_all(node):
+            if child is node or child.type != "method_invocation":
+                continue
+            child_sources, handled = project_return_source_params(child)
+            if handled:
+                sources.update(child_sources)
         return sources
 
     def expression_has_taint(node):
@@ -288,6 +439,15 @@ def _summary_key(summary):
     )
 
 
+def _return_summary_key(summary):
+    return (
+        summary["method_key"],
+        tuple(summary["source_params"]),
+        summary["return_line"],
+        summary.get("return_expression"),
+    )
+
+
 def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
     vulnerabilities = []
 
@@ -303,6 +463,7 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
     method_summaries = {}
     interprocedural_reported = set()
     project_summaries_by_key = _get_project_sql_summaries(project_index) if project_index else None
+    project_return_summaries_by_key = _get_project_sql_return_summaries(project_index) if project_index else None
 
     def identifiers(node):
         return {text(child) for child in iterate_all(node) if child.type == "identifier"}
@@ -647,7 +808,7 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
             for var_name in caller_tainted_vars
         }
 
-        def expression_source(node):
+        def direct_expression_source(node):
             input_call = find_input_call(node)
             if input_call:
                 return {
@@ -671,6 +832,63 @@ def detect_sql_injection(filepath, tree, vuln_counter, project_index=None):
                     first_var,
                     {"label": f"`{first_var}`", "line": node.start_point[0] + 1},
                 )
+            return None
+
+        def invocation_return_source(invocation_node):
+            if not caller_info or project_return_summaries_by_key is None:
+                return None
+            if invocation_node.type != "method_invocation":
+                return None
+
+            callee_info = project_index.resolve_invocation(caller_info, invocation_node, local_types)
+            if not callee_info or callee_info.signature_key == caller_info.signature_key:
+                return None
+
+            return_summaries = project_return_summaries_by_key.get(callee_info.signature_key, [])
+            if not return_summaries:
+                return None
+
+            args = argument_expressions(invocation_node.child_by_field_name("arguments"))
+            matched_sources = []
+            for return_summary in return_summaries:
+                for callee_param in return_summary["source_params"]:
+                    try:
+                        param_index = return_summary["parameters"].index(callee_param)
+                    except ValueError:
+                        continue
+                    if param_index >= len(args):
+                        continue
+                    source = expression_source(args[param_index])
+                    if source:
+                        matched_sources.append(source)
+
+            if not matched_sources:
+                return None
+
+            label = ", ".join(source["label"] for source in matched_sources)
+            return {
+                "label": f"`{text(invocation_node)}` 반환값 ({label})",
+                "line": invocation_node.start_point[0] + 1,
+            }
+
+        def expression_source(node):
+            if node.type == "method_invocation":
+                return_source = invocation_return_source(node)
+                if return_source:
+                    return return_source
+                if caller_info and project_index.resolve_invocation(caller_info, node, local_types):
+                    return None
+
+            direct_source = direct_expression_source(node)
+            if direct_source:
+                return direct_source
+
+            for child in iterate_all(node):
+                if child is node or child.type != "method_invocation":
+                    continue
+                return_source = invocation_return_source(child)
+                if return_source:
+                    return return_source
             return None
 
         def update_caller_taint(var_name, value_node):

@@ -30,6 +30,7 @@ class ProjectIndex:
     class_field_types: dict[str, dict[str, str]] = field(default_factory=dict)
     interface_implementations: dict[str, list[str]] = field(default_factory=dict)
     sql_summaries_by_key: dict[str, list[dict]] | None = None
+    sql_return_summaries_by_key: dict[str, list[dict]] | None = None
     path_summaries_by_key: dict[str, list[dict]] | None = None
     xss_summaries_by_key: dict[str, list[dict]] | None = None
     command_summaries_by_key: dict[str, list[dict]] | None = None

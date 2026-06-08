@@ -1564,6 +1564,88 @@ public class UserDao {
     assert not any(finding["function"] == "overloadedSafeSearch" for finding in findings)
 
 
+def test_sql_injection_tracks_tainted_return_values_across_files(tmp_path: Path) -> None:
+    (tmp_path / "ReturnTaintController.java").write_text(
+        """
+import java.sql.*;
+import javax.servlet.http.*;
+
+public class ReturnTaintController {
+    private final ReturnTaintService service;
+    private final ReturnTaintDao dao;
+
+    public ReturnTaintController(ReturnTaintService service, ReturnTaintDao dao) {
+        this.service = service;
+        this.dao = dao;
+    }
+
+    public ResultSet search(HttpServletRequest req, Statement stmt) throws Exception {
+        String id = req.getParameter("id");
+        String normalized = this.service.normalize(id);
+        return this.dao.find(normalized, stmt);
+    }
+
+    public ResultSet safeSearch(HttpServletRequest req, Statement stmt) throws Exception {
+        String id = req.getParameter("id");
+        String masked = this.service.mask(id);
+        return this.dao.find(masked, stmt);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "ReturnTaintService.java").write_text(
+        """
+public class ReturnTaintService {
+    public String normalize(String id) {
+        return id.trim();
+    }
+
+    public String mask(String id) {
+        audit(id);
+        return "guest";
+    }
+
+    private void audit(String id) {
+        System.out.println(id);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    (tmp_path / "ReturnTaintDao.java").write_text(
+        """
+import java.sql.*;
+
+public class ReturnTaintDao {
+    public ResultSet find(String id, Statement stmt) throws Exception {
+        String query = "SELECT * FROM users WHERE id = '" + id + "'";
+        return stmt.executeQuery(query);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(tmp_path))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "SQL_INJECTION"
+    ]
+
+    controller_findings = [
+        finding
+        for finding in findings
+        if finding["function"] == "search" and "normalize" in finding["evidence"]
+    ]
+
+    assert controller_findings
+    assert "`this.service.normalize(id)` 반환값" in controller_findings[0]["evidence"]
+    assert "ReturnTaintDao.find" in controller_findings[0]["call_chain"]
+    assert not any(finding["function"] == "safeSearch" for finding in findings)
+
+
 def test_sql_injection_treats_spring_mvc_request_param_as_source_across_files(tmp_path: Path) -> None:
     (tmp_path / "SpringUserController.java").write_text(
         """
