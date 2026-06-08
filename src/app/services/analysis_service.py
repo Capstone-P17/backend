@@ -365,25 +365,32 @@ class AnalysisService:
                         "github_archive_download_started url={}",
                         archive_url,
                     )
-                    response = client.get(archive_url)
-                    if response.status_code == 200:
-                        self._validate_upload_size(len(response.content))
+                    stream_result = self._download_archive_stream(client, archive_url)
+                    if stream_result is None:
+                        response = client.get(archive_url)
+                        status_code = response.status_code
+                        response_content = response.content
+                    else:
+                        status_code, response_content = stream_result
+
+                    if status_code == 200 and response_content is not None:
+                        self._validate_upload_size(len(response_content))
                         logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).info(
                             "github_archive_download_succeeded bytes={}",
-                            len(response.content),
+                            len(response_content),
                         )
-                        return response.content, branch
-                    if response.status_code == 404:
+                        return response_content, branch
+                    if status_code == 404:
                         logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).debug(
                             "github_archive_branch_not_found"
                         )
                         continue
                     logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
                         "github_archive_download_failed status={}",
-                        response.status_code,
+                        status_code,
                     )
                     raise GitHubRepositoryCloneError(
-                        f"GitHub 레포지토리 다운로드 실패 (HTTP {response.status_code})"
+                        f"GitHub 레포지토리 다운로드 실패 (HTTP {status_code})"
                     )
                 except httpx.TimeoutException as exc:
                     logger.bind(component="analysis.github", repository=f"{owner}/{repo}", branch=branch).warning(
@@ -406,6 +413,34 @@ class AnalysisService:
         raise InvalidGitHubRepositoryError(
             f"레포지토리를 찾을 수 없습니다: github.com/{owner}/{repo}"
         )
+
+    def _download_archive_stream(self, client: httpx.Client, archive_url: str) -> tuple[int, bytes | None] | None:
+        stream = getattr(client, "stream", None)
+        if not callable(stream):
+            return None
+
+        with stream("GET", archive_url) as response:
+            if response.status_code != 200:
+                return response.status_code, None
+
+            content_length = response.headers.get("content-length")
+            if content_length:
+                try:
+                    expected_bytes = int(content_length)
+                except ValueError:
+                    expected_bytes = None
+                if expected_bytes is not None:
+                    self._validate_upload_size(expected_bytes)
+
+            chunks: list[bytes] = []
+            total_bytes = 0
+            for chunk in response.iter_bytes():
+                if not chunk:
+                    continue
+                total_bytes += len(chunk)
+                self._validate_upload_size(total_bytes)
+                chunks.append(chunk)
+            return response.status_code, b"".join(chunks)
 
     def _fetch_github_default_branch(self, client: httpx.Client, owner: str, repo: str) -> str | None:
         api_url = _GITHUB_REPO_API_URL.format(owner=owner, repo=repo)
@@ -676,6 +711,10 @@ class AnalysisService:
         return stat.S_ISLNK(unix_mode)
 
     @staticmethod
+    def _is_encrypted_archive_member(member: ZipInfo) -> bool:
+        return bool(member.flag_bits & 0x1)
+
+    @staticmethod
     def _assert_path_inside_root(path: Path, root: Path) -> None:
         if path != root and root not in path.parents:
             raise InvalidRepositoryArchiveError("압축 파일 경로가 작업 디렉토리를 벗어납니다")
@@ -688,6 +727,8 @@ class AnalysisService:
     def _extract_archive_member(self, archive_file: ZipFile, member: ZipInfo, extract_root: Path) -> None:
         if self._is_archive_symlink(member):
             raise InvalidRepositoryArchiveError("압축 파일에 심볼릭 링크가 포함되어 분석할 수 없습니다")
+        if self._is_encrypted_archive_member(member):
+            raise InvalidRepositoryArchiveError("암호화된 ZIP 항목은 분석할 수 없습니다")
 
         target_path = self._archive_member_target_path(extract_root, member.filename)
         if member.is_dir():

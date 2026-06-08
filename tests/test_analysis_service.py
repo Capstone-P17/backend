@@ -134,6 +134,13 @@ def test_uploaded_repository_rejects_symlink_member() -> None:
         )
 
 
+def test_uploaded_repository_rejects_encrypted_member() -> None:
+    encrypted = ZipInfo("repo/Safe.java")
+    encrypted.flag_bits |= 0x1
+
+    assert AnalysisService._is_encrypted_archive_member(encrypted)
+
+
 def test_uploaded_repository_rejects_java_file_count_limit() -> None:
     settings = get_settings().model_copy(update={"max_analysis_java_files": 1})
     service = AnalysisService(
@@ -177,15 +184,38 @@ def test_github_repository_returns_analysis_id_envelope_without_network(monkeypa
 
 
 class FakeGitHubResponse:
-    def __init__(self, status_code: int, *, content: bytes = b"", payload: dict | None = None) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        content: bytes = b"",
+        payload: dict | None = None,
+        headers: dict[str, str] | None = None,
+        chunks: list[bytes] | None = None,
+    ) -> None:
         self.status_code = status_code
         self.content = content
         self._payload = payload
+        self.headers = headers or {}
+        self._chunks = chunks
 
     def json(self) -> dict:
         if self._payload is None:
             raise ValueError("no json payload")
         return self._payload
+
+    def __enter__(self) -> "FakeGitHubResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    def iter_bytes(self):
+        if self._chunks is not None:
+            yield from self._chunks
+            return
+        if self.content:
+            yield self.content
 
 
 class FakeGitHubClient:
@@ -200,6 +230,11 @@ class FakeGitHubClient:
         return None
 
     def get(self, url: str, **kwargs) -> FakeGitHubResponse:
+        self.requests.append(url)
+        return self.responses.get(url, FakeGitHubResponse(404))
+
+    def stream(self, method: str, url: str) -> FakeGitHubResponse:
+        assert method == "GET"
         self.requests.append(url)
         return self.responses.get(url, FakeGitHubResponse(404))
 
@@ -301,6 +336,57 @@ def test_github_archive_falls_back_when_default_branch_lookup_fails(
         "https://api.github.com/repos/acme/repo",
         "https://github.com/acme/repo/archive/refs/heads/main.zip",
     ]
+
+
+def test_github_archive_rejects_content_length_over_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = get_settings().model_copy(update={"max_upload_bytes": 8})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+    install_fake_github_client(
+        monkeypatch,
+        {
+            "https://api.github.com/repos/acme/repo": FakeGitHubResponse(
+                200,
+                payload={"default_branch": "main"},
+            ),
+            "https://github.com/acme/repo/archive/refs/heads/main.zip": FakeGitHubResponse(
+                200,
+                headers={"content-length": "9"},
+                chunks=[b"1234"],
+            ),
+        },
+    )
+
+    with pytest.raises(UploadTooLargeError):
+        service._download_github_archive("acme", "repo")
+
+
+def test_github_archive_rejects_stream_over_limit_without_content_length(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = get_settings().model_copy(update={"max_upload_bytes": 8})
+    service = AnalysisService(
+        settings=settings,
+        analyzer_service=AnalyzerService(settings.workspace_root),
+        result_store=AnalysisResultStore(),
+    )
+    install_fake_github_client(
+        monkeypatch,
+        {
+            "https://api.github.com/repos/acme/repo": FakeGitHubResponse(
+                200,
+                payload={"default_branch": "main"},
+            ),
+            "https://github.com/acme/repo/archive/refs/heads/main.zip": FakeGitHubResponse(
+                200,
+                chunks=[b"1234", b"56789"],
+            ),
+        },
+    )
+
+    with pytest.raises(UploadTooLargeError):
+        service._download_github_archive("acme", "repo")
 
 
 def test_github_repository_attaches_blob_source_links(monkeypatch) -> None:
