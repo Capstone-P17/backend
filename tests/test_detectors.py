@@ -1057,6 +1057,46 @@ public class SpringFileService {
     assert not any(finding["function"] == "safeDownload" for finding in findings)
 
 
+def test_path_traversal_suppresses_normalize_startswith_guard(tmp_path: Path) -> None:
+    sample = tmp_path / "PathValidationController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.nio.file.*;
+import javax.servlet.http.*;
+
+public class PathValidationController {
+    public FileInputStream unsafePath(HttpServletRequest request) throws Exception {
+        String fileName = request.getParameter("file");
+        String target = "/var/app/files/" + fileName;
+        return new FileInputStream(new File(target));
+    }
+
+    public FileInputStream safePath(HttpServletRequest request) throws Exception {
+        String fileName = request.getParameter("file");
+        Path base = Paths.get("/var/app/files").toRealPath();
+        Path target = base.resolve(fileName).normalize();
+        if (!target.startsWith(base)) {
+            throw new SecurityException("blocked");
+        }
+        return new FileInputStream(new File(target.toString()));
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "PATH_TRAVERSAL"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafePath"]
+    assert "safePath" not in {finding["function"] for finding in findings}
+
+
 def test_command_injection_tracks_tainted_list_into_process_builder_command(tmp_path: Path) -> None:
     sample = tmp_path / "CommandListController.java"
     sample.write_text(
@@ -1171,6 +1211,44 @@ public class CommandExecutor {
     assert "Runtime.exec" in finding["call_chain"][-1]
     assert "inter-procedural" in finding["confidence_reason"]
     assert not any(finding["function"] == "safeRun" for finding in findings)
+
+
+def test_command_injection_suppresses_allowlist_guard(tmp_path: Path) -> None:
+    sample = tmp_path / "CommandAllowlistController.java"
+    sample.write_text(
+        """
+import java.io.*;
+import java.util.*;
+import javax.servlet.http.*;
+
+public class CommandAllowlistController {
+    public Process unsafeCommand(HttpServletRequest request) throws IOException {
+        String command = request.getParameter("cmd");
+        return Runtime.getRuntime().exec(command);
+    }
+
+    public Process safeCommand(HttpServletRequest request) throws IOException {
+        String command = request.getParameter("cmd");
+        Set<String> allowedCommands = Set.of("uptime", "whoami");
+        if (!allowedCommands.contains(command)) {
+            throw new SecurityException("blocked");
+        }
+        return Runtime.getRuntime().exec(command);
+    }
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    result = AnalyzerService(tmp_path).analyze(str(sample))
+    findings = [
+        finding
+        for finding in result["analysis_result"]["vulnerabilities"]
+        if finding["type"] == "COMMAND_INJECTION"
+    ]
+
+    assert [finding["function"] for finding in findings] == ["unsafeCommand"]
+    assert "safeCommand" not in {finding["function"] for finding in findings}
 
 
 def test_insecure_random_requires_security_context(tmp_path: Path) -> None:

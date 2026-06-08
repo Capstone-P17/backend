@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
-from src.app.services.static_analysis.rules import HTTP_REQUEST_SOURCE_METHODS
+from src.app.services.static_analysis.rules import (
+    COMMAND_ALLOWLIST_CONTAINER_HINTS,
+    COMMAND_ALLOWLIST_METHODS,
+    HTTP_REQUEST_SOURCE_METHODS,
+)
 from src.app.services.static_analysis.taint_summary import (
     argument_expressions as _argument_expressions,
     identifiers as _identifiers,
@@ -14,6 +18,29 @@ from src.app.services.static_analysis.taint_summary import (
 )
 
 INPUT_METHODS = HTTP_REQUEST_SOURCE_METHODS
+
+
+def _looks_like_command_allowlist_receiver(node):
+    if node is None:
+        return False
+    text = _node_text(node)
+    lower_text = text.lower()
+    return any(hint.lower() in lower_text for hint in COMMAND_ALLOWLIST_CONTAINER_HINTS)
+
+
+def _allowlist_validated_vars(node, tainted_names):
+    if node.type != "method_invocation":
+        return set()
+    name_node = node.child_by_field_name("name")
+    object_node = node.child_by_field_name("object")
+    args_node = node.child_by_field_name("arguments")
+    if not name_node or not args_node:
+        return set()
+    if _node_text(name_node) not in COMMAND_ALLOWLIST_METHODS:
+        return set()
+    if not _looks_like_command_allowlist_receiver(object_node):
+        return set()
+    return set(_referenced_vars(args_node, tainted_names))
 
 
 def _method_invocation_name(node):
@@ -66,6 +93,7 @@ def _collect_command_summaries_for_method(method, project_index, summaries_by_ke
     tainted_vars = set(method.parameters)
     param_sources = {param: {param} for param in method.parameters}
     tainted_collections = {}
+    validated_command_vars = set()
     process_builder_vars = set()
     summaries = []
     local_types = project_index.variable_types_for(method)
@@ -85,6 +113,7 @@ def _collect_command_summaries_for_method(method, project_index, summaries_by_ke
             return
         tainted_vars.discard(var_name)
         param_sources.pop(var_name, None)
+        validated_command_vars.discard(var_name)
 
     def mark_process_builder_var(name_node, declaration_node):
         if name_node and "ProcessBuilder" in _node_text(declaration_node):
@@ -140,6 +169,9 @@ def _collect_command_summaries_for_method(method, project_index, summaries_by_ke
                 "line": node.start_point[0] + 1,
             }
 
+    def mark_allowlist_validation(node):
+        validated_command_vars.update(_allowlist_validated_vars(node, tainted_vars))
+
     def inspect_command_sink(node):
         sink = _sink_desc(node, process_builder_vars)
         if not sink:
@@ -160,6 +192,8 @@ def _collect_command_summaries_for_method(method, project_index, summaries_by_ke
 
         refs = _referenced_vars(args_node, tainted_vars)
         if not refs:
+            return
+        if any(ref in validated_command_vars for ref in refs):
             return
         source_params = set()
         for ref in refs:
@@ -206,6 +240,7 @@ def _collect_command_summaries_for_method(method, project_index, summaries_by_ke
                 update_variable(_node_text(left), right)
 
         if node.type == "method_invocation":
+            mark_allowlist_validation(node)
             mark_tainted_collection(node)
             inspect_command_sink(node)
             inspect_summary_call(node)
@@ -232,6 +267,7 @@ def detect_command_injection(filepath, tree, vuln_counter, project_index=None):
     vulnerabilities = []
     tainted_vars = {}
     tainted_collections = {}
+    validated_command_vars = set()
     process_builder_vars = set()
     reported_sinks = set()
     interprocedural_reported = set()
@@ -269,6 +305,8 @@ def detect_command_injection(filepath, tree, vuln_counter, project_index=None):
             "code": source_label or declaration_node.text.decode().strip(),
             "source_var": tainted_source or name,
         }
+        if name not in _allowlist_validated_vars(source_node, {name}):
+            validated_command_vars.discard(name)
 
     def mark_process_builder_var(name_node, declaration_node):
         if not name_node:
@@ -317,6 +355,7 @@ def detect_command_injection(filepath, tree, vuln_counter, project_index=None):
                 continue
             method_name = name_node.text.decode()
             object_name = object_node.text.decode()
+            validated_command_vars.update(_allowlist_validated_vars(node, tainted_vars))
             if method_name in {"add", "addAll"}:
                 source_var = tainted_identifier_in(args_node)
                 if source_var:
@@ -357,6 +396,8 @@ def detect_command_injection(filepath, tree, vuln_counter, project_index=None):
 
     def report(node, tainted_var, sink_desc, collection_var=None):
         report_key = (node.start_point[0], tainted_var, sink_desc, collection_var or "")
+        if tainted_var in validated_command_vars:
+            return
         if report_key in reported_sinks:
             return
         reported_sinks.add(report_key)
@@ -642,6 +683,7 @@ def detect_command_injection(filepath, tree, vuln_counter, project_index=None):
     for scope in scopes:
         tainted_vars.clear()
         tainted_collections.clear()
+        validated_command_vars.clear()
         process_builder_vars.clear()
         if project_index and scope.type == "method_declaration":
             method_info = project_index.resolve_method(method_label(scope), arity=len(parameter_names(scope)))

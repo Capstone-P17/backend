@@ -76,8 +76,21 @@ PATH_FILE_TYPES = (
     "RandomAccessFile",
 )
 PATH_FACTORY_METHODS = ("Paths.get", "Path.of")
+PATH_NORMALIZATION_METHODS = ("normalize", "toRealPath")
+PATH_CONTAINMENT_METHODS = ("startsWith",)
 
 COMMAND_EXEC_METHODS = ("Runtime.exec", "ProcessBuilder.command", "new ProcessBuilder")
+COMMAND_ALLOWLIST_METHODS = ("contains",)
+COMMAND_ALLOWLIST_CONTAINER_HINTS = (
+    "allowed",
+    "allowlist",
+    "allow_list",
+    "permitted",
+    "permitlist",
+    "whitelist",
+    "Set.of",
+    "List.of",
+)
 
 UPLOAD_TYPES = ("MultipartFile", "Part", "FileItem")
 UPLOAD_FILENAME_METHODS = ("getOriginalFilename", "getSubmittedFileName")

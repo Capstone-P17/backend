@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from src.app.services.static_analysis.detectors.metadata import enrich_finding
 from src.app.services.static_analysis.parser import find_parent_class, find_parent_method, iterate_all
-from src.app.services.static_analysis.rules import HTTP_REQUEST_SOURCE_METHODS, PATH_FILE_TYPES
+from src.app.services.static_analysis.rules import (
+    HTTP_REQUEST_SOURCE_METHODS,
+    PATH_CONTAINMENT_METHODS,
+    PATH_FILE_TYPES,
+    PATH_NORMALIZATION_METHODS,
+)
 from src.app.services.static_analysis.taint_summary import (
     argument_expressions as _argument_expressions,
     identifiers as _identifiers,
@@ -54,6 +59,17 @@ def _sink_arguments(node):
     return None
 
 
+def _has_path_normalization(node):
+    if node is None:
+        return False
+    text = _node_text(node)
+    return any(f".{method}(" in text for method in PATH_NORMALIZATION_METHODS)
+
+
+def _is_path_containment_check(node):
+    return node.type == "method_invocation" and _method_invocation_name(node) in PATH_CONTAINMENT_METHODS
+
+
 def _get_project_path_summaries(project_index):
     return initialize_summary_cache(
         project_index,
@@ -68,6 +84,8 @@ def _get_project_path_summaries(project_index):
 def _collect_path_summaries_for_method(method, project_index, summaries_by_key):
     tainted_vars = set(method.parameters)
     param_sources = {param: {param} for param in method.parameters}
+    normalized_path_vars = set()
+    validated_path_vars = set()
     summaries = []
     local_types = project_index.variable_types_for(method)
 
@@ -83,9 +101,31 @@ def _collect_path_summaries_for_method(method, project_index, summaries_by_key):
         if source_params:
             tainted_vars.add(var_name)
             param_sources[var_name] = set(source_params)
+            if _has_path_normalization(value_node):
+                normalized_path_vars.add(var_name)
+            else:
+                normalized_path_vars.discard(var_name)
             return
         tainted_vars.discard(var_name)
         param_sources.pop(var_name, None)
+        normalized_path_vars.discard(var_name)
+        validated_path_vars.discard(var_name)
+
+    def mark_path_validation(node):
+        if not _is_path_containment_check(node):
+            return
+        object_node = node.child_by_field_name("object")
+        if not object_node:
+            return
+        object_refs = _identifiers(object_node)
+        object_text = _node_text(object_node)
+        for ref in object_refs:
+            if ref not in tainted_vars:
+                continue
+            if ref in normalized_path_vars or _has_path_normalization(object_node) or _has_path_normalization(node):
+                validated_path_vars.add(ref)
+        if object_text in normalized_path_vars:
+            validated_path_vars.add(object_text)
 
     def add_summary(*, source_params, sink_node, path_var=None, callee_summary=None):
         if not source_params:
@@ -126,6 +166,8 @@ def _collect_path_summaries_for_method(method, project_index, summaries_by_key):
             return
         refs = _referenced_vars(args_node, tainted_vars)
         if not refs:
+            return
+        if any(ref in validated_path_vars for ref in refs):
             return
         source_params = set()
         for ref in refs:
@@ -174,6 +216,7 @@ def _collect_path_summaries_for_method(method, project_index, summaries_by_key):
             inspect_path_sink(node)
 
         if node.type == "method_invocation":
+            mark_path_validation(node)
             inspect_path_sink(node)
             inspect_summary_call(node)
 
@@ -195,6 +238,8 @@ def _summary_key(summary):
 def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
     vulnerabilities = []
     tainted_vars = {}
+    normalized_path_vars = set()
+    validated_path_vars = set()
     reported_sinks = set()
     interprocedural_reported = set()
     project_summaries_by_key = _get_project_path_summaries(project_index) if project_index else None
@@ -278,7 +323,27 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
             "previous_var": source_var or cookie_source,
             "source_kind": source_kind,
         }
+        if _has_path_normalization(source_node):
+            normalized_path_vars.add(name)
+        else:
+            normalized_path_vars.discard(name)
         return True
+
+    def mark_path_validation(node):
+        if not _is_path_containment_check(node):
+            return
+        object_node = node.child_by_field_name("object")
+        if not object_node:
+            return
+        object_refs = identifiers_in(object_node)
+        object_text = node_text(object_node)
+        for ref in object_refs:
+            if ref not in tainted_vars:
+                continue
+            if ref in normalized_path_vars or _has_path_normalization(object_node) or _has_path_normalization(node):
+                validated_path_vars.add(ref)
+        if object_text in normalized_path_vars:
+            validated_path_vars.add(object_text)
 
     def mark_enhanced_for_cookie_var(node):
         name_node = node.child_by_field_name("name")
@@ -315,6 +380,8 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
                     marked = mark_tainted_var(name_node, value_node, node, source_kind)
                     if not marked and name_node and value_node:
                         tainted_vars.pop(name_node.text.decode(), None)
+                        normalized_path_vars.discard(name_node.text.decode())
+                        validated_path_vars.discard(name_node.text.decode())
                 continue
 
             if node.type == "assignment_expression":
@@ -324,6 +391,11 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
                     marked = mark_tainted_var(left_node, right_node, node)
                     if not marked and right_node:
                         tainted_vars.pop(left_node.text.decode(), None)
+                        normalized_path_vars.discard(left_node.text.decode())
+                        validated_path_vars.discard(left_node.text.decode())
+
+            if node.type == "method_invocation":
+                mark_path_validation(node)
 
     def build_evidence(tainted_var, sink_desc):
         source = source_info_for(tainted_var)
@@ -359,6 +431,8 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
 
     def report(node, tainted_var, sink_desc):
         report_key = (node.start_point[0], tainted_var, sink_desc)
+        if tainted_var in validated_path_vars:
+            return
         if report_key in reported_sinks:
             return
         reported_sinks.add(report_key)
@@ -623,6 +697,8 @@ def detect_path_traversal(filepath, tree, vuln_counter, project_index=None):
     scopes = methods or [tree.root_node]
     for scope in scopes:
         tainted_vars.clear()
+        normalized_path_vars.clear()
+        validated_path_vars.clear()
         if project_index and scope.type == "method_declaration":
             method_info = project_index.resolve_method(method_label(scope), arity=len(parameter_names(scope)))
             if method_info:

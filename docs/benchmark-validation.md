@@ -76,9 +76,11 @@ P17_BENCHMARK_ROOT=/path/to/security-benchmarks .venv/bin/python -m pytest tests
 - SQL Injection MyBatis XML: XML mapper의 `select/insert/update/delete` statement에서 `${...}` 또는 `$name$` 문자열 치환을 탐지하고, `#{...}` 바인딩과 주석 처리된 statement는 제외하도록 보강했다.
 - Command Injection: 프로젝트 단위 method index를 사용해 `Controller -> CommandExecutor -> Runtime.exec(...)`처럼 클래스/파일 경계를 넘는 명령 실행 흐름을 탐지하도록 개선했다.
 - Command Injection: OWASP BenchmarkTest00006의 `request.getHeader(...) -> param -> argList.add(...) -> ProcessBuilder.command(argList)` 흐름을 탐지하도록 개선했다.
+- Command Injection: `allowedCommands.contains(command)` 또는 `Set.of(...).contains(command)` 같은 허용 목록 검증이 확인된 명령 변수는 직접 실행 sink에서 제외해 오탐 가능성을 줄였다.
 - File Upload: 프로젝트 단위 method index를 사용해 `Controller MultipartFile -> StorageService.save(file) -> transferTo/Files.copy`처럼 클래스/파일 경계를 넘는 업로드 저장 흐름을 탐지하도록 개선했다.
 - Path Traversal: 프로젝트 단위 method index를 사용해 `Controller -> Service/FileService 구현체 -> FileInputStream`처럼 클래스/파일 경계를 넘는 경로 조작 흐름을 탐지하도록 개선했다.
 - Path Traversal: OWASP BenchmarkTest00001의 `request.getCookies() -> Cookie.getValue() -> fileName -> FileInputStream` 흐름을 탐지하도록 개선했다.
+- Path Traversal: `normalize()` 또는 `toRealPath()`로 정규화한 경로가 `startsWith(base)` 기준 디렉터리 검증을 거친 경우 파일 접근 sink에서 제외해 오탐 가능성을 줄였다.
 - XSS: 프로젝트 단위 method index를 사용해 `Controller -> Renderer/Service 구현체 -> HTML 반환값 -> response.write(...)`처럼 클래스/파일 경계를 넘는 출력 흐름을 탐지하도록 개선했다.
 - XSS: OWASP BenchmarkTest00013의 `request.getHeaders(...) -> param -> response.getWriter().format(...)` 흐름과 Juliet CWE83 14번의 branch assignment 후 HTML 출력 흐름을 탐지하도록 개선했다.
 - Hardcoded Secret: Juliet CWE259 01번의 `data = "..." -> DriverManager.getConnection(..., data)` assignment 흐름을 탐지하도록 개선했다.
